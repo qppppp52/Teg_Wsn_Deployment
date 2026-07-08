@@ -22,6 +22,9 @@ class DQNAgent:
         self.batch_size = int(dcfg.get("batch_size", 64))
         self.min_replay_size = int(dcfg.get("min_replay_size", 200))
         self.target_update_interval = int(dcfg.get("target_update_interval", 10))
+        self.use_double_dqn = bool(dcfg.get("use_double_dqn", True))
+        self.grad_clip_norm = dcfg.get("grad_clip_norm", 5.0)
+        self.reward_normalization = bool(dcfg.get("reward_normalization", True))
         self.epsilon_start = float(dcfg.get("epsilon_start", 1.0))
         self.epsilon_end = float(dcfg.get("epsilon_end", 0.05))
         self.epsilon_decay_generations = max(int(dcfg.get("epsilon_decay_generations", 80)), 1)
@@ -33,18 +36,31 @@ class DQNAgent:
         self.replay = ReplayBuffer(dcfg.get("replay_capacity", 5000))
         self.steps = 0
         self.last_loss = None
+        self.last_q_mean = None
+        self.last_q_max = None
+        self.target_updated = False
 
     def epsilon(self, gen):
         frac = min(max(float(gen) / self.epsilon_decay_generations, 0.0), 1.0)
         return self.epsilon_start + frac * (self.epsilon_end - self.epsilon_start)
 
-    def select_action(self, state, gen=0):
+    def select_action(self, state, gen=0, action_mask=None):
+        mask = self._normalize_action_mask(action_mask)
         eps = self.epsilon(gen)
         if random.random() < eps:
-            return random.randrange(self.action_dim)
+            choices = np.flatnonzero(mask)
+            return int(random.choice(choices.tolist()))
         with torch.no_grad():
             s = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
-            return int(torch.argmax(self.q_net(s), dim=1).item())
+            q_values = self.q_net(s).squeeze(0)
+            q_values = q_values.masked_fill(
+                torch.as_tensor(~mask, dtype=torch.bool, device=self.device),
+                -1.0e9,
+            )
+            allowed = q_values[torch.as_tensor(mask, dtype=torch.bool, device=self.device)]
+            self.last_q_mean = float(allowed.mean().item())
+            self.last_q_max = float(allowed.max().item())
+            return int(torch.argmax(q_values).item())
 
     def train_step(self):
         if len(self.replay) < max(self.min_replay_size, self.batch_size):
@@ -53,21 +69,54 @@ class DQNAgent:
         states = torch.as_tensor(states, dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)
         rewards = torch.as_tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)
+        if self.reward_normalization and rewards.numel() > 1:
+            std = rewards.std(unbiased=False)
+            if float(std.item()) > 1.0e-8:
+                rewards = (rewards - rewards.mean()) / (std + 1.0e-8)
         next_states = torch.as_tensor(next_states, dtype=torch.float32, device=self.device)
         dones = torch.as_tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
 
         q = self.q_net(states).gather(1, actions)
         with torch.no_grad():
-            target = rewards + self.gamma * (1.0 - dones) * self.target_net(next_states).max(dim=1, keepdim=True).values
+            if self.use_double_dqn:
+                next_actions = self.q_net(next_states).argmax(dim=1, keepdim=True)
+                next_q = self.target_net(next_states).gather(1, next_actions)
+            else:
+                next_q = self.target_net(next_states).max(dim=1, keepdim=True).values
+            target = rewards + self.gamma * (1.0 - dones) * next_q
         loss = torch.nn.functional.smooth_l1_loss(q, target)
         self.optimizer.zero_grad()
         loss.backward()
+        if self.grad_clip_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), float(self.grad_clip_norm))
         self.optimizer.step()
         self.steps += 1
+        self.target_updated = False
         if self.steps % self.target_update_interval == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
+            self.target_updated = True
         self.last_loss = float(loss.item())
         return self.last_loss
+
+    def q_stats(self, state, action_mask=None):
+        mask = self._normalize_action_mask(action_mask)
+        with torch.no_grad():
+            s = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            q_values = self.q_net(s).squeeze(0)
+            allowed = q_values[torch.as_tensor(mask, dtype=torch.bool, device=self.device)]
+            if allowed.numel() == 0:
+                return float("nan"), float("nan")
+            return float(allowed.mean().item()), float(allowed.max().item())
+
+    def _normalize_action_mask(self, action_mask):
+        if action_mask is None:
+            return np.ones(self.action_dim, dtype=bool)
+        mask = np.asarray(action_mask, dtype=bool).reshape(-1)
+        if mask.size != self.action_dim:
+            raise ValueError(f"action_mask size {mask.size} != action_dim {self.action_dim}")
+        if not np.any(mask):
+            mask = np.ones(self.action_dim, dtype=bool)
+        return mask
 
     def save(self, path):
         """Save a full training checkpoint."""

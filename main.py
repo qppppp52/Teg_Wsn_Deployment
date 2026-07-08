@@ -212,26 +212,30 @@ def _save_convergence_csv(history, path):
 
 
 def _save_pareto_csv(solutions, representatives, path):
-    feasible = [s for s in solutions if s.feasible]
-    role_by_id = {id(sol): role for role, sol in representatives.items() if sol is not None}
+    feasible = [sol for sol in solutions if sol.feasible]
+    rec = representatives.get("recommended_compromise")
+    cov_best = representatives.get("coverage_best")
+    rsum_best = representatives.get("rsum_best")
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["solution_id", "role", "coverage", "rsum", "throughput_capacity", "throughput_actual", "cv", "num_sensors", "num_aps", "repair_iter", "repair_strategy"])
+        writer.writerow([
+            "solution_id", "coverage", "rsum_actual", "rsum_capacity", "cv",
+            "active_sensors", "active_aps", "recommended_flag",
+            "coverage_best_flag", "rsum_best_flag",
+        ])
         for idx, solution in enumerate(feasible):
             writer.writerow([
                 idx,
-                role_by_id.get(id(solution), "pareto"),
                 solution.coverage,
-                solution.throughput,
-                solution.metadata.get("throughput_capacity", solution.throughput),
                 solution.metadata.get("throughput_actual", solution.throughput),
+                solution.metadata.get("throughput_capacity", solution.throughput),
                 solution.cv,
                 int(np.sum(solution.x)),
                 int(np.sum(solution.y)),
-                getattr(solution, "repair_iter", 0),
-                getattr(solution, "repair_strategy", None),
+                int(solution is rec),
+                int(solution is cov_best),
+                int(solution is rsum_best),
             ])
-
 
 def _save_recommended_solution_csv(representatives, path):
     with open(path, "w", newline="", encoding="utf-8") as f:
@@ -389,7 +393,13 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         init_metrics = getattr(algo, "init_metrics", [])
         init_cvs = [float(row["cv"]) for row in init_metrics]
         init_feasible = [bool(row["feasible"]) for row in init_metrics]
+        accepted = getattr(algo, "accepted_counts", {}) or {}
+        drl_training_time = float(getattr(algo, "init_train_seconds", 0.0))
+        online_optimization_time = max(float(runtime_seconds) - drl_training_time, 0.0)
         summary.update({
+            "drl_training_time": drl_training_time,
+            "online_optimization_time": online_optimization_time,
+            "total_time": float(runtime_seconds),
             "init_FR_before_repair": float(np.mean([bool(row.get("feasible_before_repair", False)) for row in init_metrics])) if init_metrics else 0.0,
             "init_CV_before_repair": float(np.mean([float(row.get("cv_before_repair", row["cv"])) for row in init_metrics])) if init_metrics else float("nan"),
             "init_FR_after_repair": float(np.mean(init_feasible)) if init_feasible else 0.0,
@@ -397,8 +407,11 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
             "init_FR": float(np.mean(init_feasible)) if init_feasible else 0.0,
             "init_CV_mean": float(np.mean(init_cvs)) if init_cvs else float("nan"),
             "init_diversity": _init_source_diversity(init_metrics),
+            "accepted_drl_count": int(accepted.get("drl", 0)),
+            "accepted_heuristic_count": int(accepted.get("heuristic", 0)),
+            "accepted_random_count": int(accepted.get("random", 0)),
             "drl_train_episodes": int(config.get("drl_init", {}).get("train_episodes", 0)),
-            "drl_init_train_seconds": float(getattr(algo, "init_train_seconds", 0.0)),
+            "drl_init_train_seconds": drl_training_time,
             "init_policy_path": getattr(algo, "init_policy_path", None) or "",
         })
     return summary

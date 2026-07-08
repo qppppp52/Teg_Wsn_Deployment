@@ -8,6 +8,7 @@ from src.io.config_reader import load_experiment_config
 def _writable_test_dir():
     candidates = [
         os.environ.get("TEG_WSN_TEST_TMP"),
+        "test_outputs",
         "C:/tmp/teg_wsn_tests",
         "C:/Users/qpppp/Documents/Codex/2026-06-30/new-chat/test_outputs",
     ]

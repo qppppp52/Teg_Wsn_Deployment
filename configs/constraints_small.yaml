@@ -1,5 +1,5 @@
 ﻿ap:
-  C_max: 10
+  C_max: 6
   P_idle: 0.05
   P_proc: 0.02
   P_rx: 0.003
@@ -14,7 +14,7 @@ teg:
     R_TEG: 0.12
     R_int: 0.8
     T_amb: 295.15
-    eta: 0.8
+    eta: 0.65
     h_sink: 50.0
     sigma: 0.12
 
@@ -57,3 +57,4 @@ constraints:
     sink: 10.0
     service: 5.0
     total: 20.0
+

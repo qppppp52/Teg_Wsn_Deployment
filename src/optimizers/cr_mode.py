@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 from src.optimizers.base_optimizer import BaseOptimizer
 from src.model.population import Population
 from src.model.pareto_archive import ParetoArchive
@@ -12,6 +12,7 @@ from src.evaluation.generation_diagnostics import make_convergence_history, reco
 
 logger = get_logger("CR-MODE")
 
+
 class CRMode(BaseOptimizer):
     def __init__(self, ctx, config):
         super().__init__(ctx, config)
@@ -23,21 +24,27 @@ class CRMode(BaseOptimizer):
         self.population = None
         self.convergence_history = make_convergence_history()
 
-
-    def run(self):
+    def initialize_population(self):
         im = self.ctx.index_mapping
-        self.population = Population(self.NP, im.num_sensor_candidates, im.num_ap_candidates)
-        self.population.initialize(self.ctx, strategy="mixed")
+        population = Population(self.NP, im.num_sensor_candidates, im.num_ap_candidates)
+        population.initialize(self.ctx, strategy=self.config.get("mode", {}).get("initialization", "mixed"))
+        return population
+
+    def evaluate_population(self):
         solutions = []
-        for ind in self.population.individuals:
+        for idx, ind in enumerate(self.population.individuals):
             sol, rep_ind = evaluate_individual(ind, self.ctx)
             if rep_ind is not None:
                 ind = rep_ind
-                self.population.individuals[len(solutions)] = ind
+                self.population.individuals[idx] = ind
             _copy_solution_metrics(ind, sol)
             solutions.append(sol)
         self.population.solutions = solutions
-        self.archive.update(solutions)
+
+    def run(self):
+        self.population = self.initialize_population()
+        self.evaluate_population()
+        self.archive.update(self.population.solutions)
         self._record_convergence(0)
         for gen in range(self.Tmax):
             new_inds, new_sols = [], []
@@ -49,7 +56,6 @@ class CRMode(BaseOptimizer):
                 trial_sol, rep_ind = evaluate_individual(trial, self.ctx)
                 if rep_ind is not None:
                     trial = rep_ind
-                    trial_sol, _ = evaluate_individual(trial, self.ctx)
                 winner, winner_sol, _ = select_better(
                     trial, trial_sol, ind, self.population.solutions[i])
                 _copy_solution_metrics(winner, winner_sol)
@@ -59,7 +65,7 @@ class CRMode(BaseOptimizer):
             self.population.solutions = new_sols
             self.archive.update(new_sols)
             self._record_convergence(gen + 1)
-            if gen % 10 == 0 or gen == self.Tmax-1:
+            if gen % 10 == 0 or gen == self.Tmax - 1:
                 stats = self.population.get_statistics()
                 cov_str = f"{stats['Coverage_avg_feasible']:.3f}" if not (isinstance(stats['Coverage_avg_feasible'], float) and np.isnan(stats['Coverage_avg_feasible'])) else "NaN"
                 rsum_str = f"{stats['Rsum_avg_feasible']:.1f}" if not (isinstance(stats['Rsum_avg_feasible'], float) and np.isnan(stats['Rsum_avg_feasible'])) else "NaN"
@@ -75,6 +81,7 @@ class CRMode(BaseOptimizer):
         metrics = record_generation(self.convergence_history, self.population, self.archive, self.config)
         if metrics.get("saturated_link_ratio", 0.0) > 0.9:
             logger.warning("Throughput actual is saturated; Pareto front may degenerate.")
+
 
 def _copy_solution_metrics(individual, solution):
     individual.coverage = solution.coverage

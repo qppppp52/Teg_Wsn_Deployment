@@ -11,7 +11,8 @@ from src.operators.mode_mutation import mutate
 from src.operators.mode_crossover import crossover
 from src.operators.mode_selection import select_better
 from src.evaluator.individual_evaluator import evaluate_individual
-from src.dqn.action_space import get_action, action_dim
+from src.dqn.action_space import ACTIONS, get_action, action_dim
+from src.dqn.action_mask import build_dqn_action_mask
 from src.dqn.state_builder import build_state
 from src.dqn.reward_function import compute_reward
 from src.evaluation.diversity import objective_space_diversity
@@ -42,7 +43,7 @@ class DQNCRMode(BaseOptimizer):
             state_dim = len(build_state(_EmptyPopulation(), self.archive, ctx))
             self.agent = DQNAgent(state_dim, action_dim(), config)
         except Exception as exc:
-            logger.warning(f"DQNAgent unavailable; using stochastic action policy: {exc}")
+            logger.warning(f"DQNAgent unavailable; using masked stochastic action policy: {exc}")
 
     def run(self):
         im = self.ctx.index_mapping
@@ -60,14 +61,26 @@ class DQNCRMode(BaseOptimizer):
         self._record_convergence(0)
 
         prev_metrics = self._metrics()
+        hv_stall = 0
+        prev_hv = prev_metrics["HV"]
         for gen in range(self.Tmax):
             state = build_state(
                 self.population, self.archive, self.ctx,
                 {"HV": self.convergence_history["HV"][-1], "current_HV": self.convergence_history["HV"][-1]},
                 gen, self.Tmax,
             )
-            action_id = self.agent.select_action(state, gen) if self.agent is not None else int(np.random.randint(action_dim()))
+            mask_metrics = dict(prev_metrics)
+            mask_metrics["hv_stall_generations"] = hv_stall
+            mask = build_dqn_action_mask(mask_metrics, ACTIONS, self.config)
+            if self.agent is not None:
+                action_id = self.agent.select_action(state, gen, action_mask=mask)
+                q_mean, q_max = self.agent.q_stats(state, mask)
+            else:
+                choices = np.flatnonzero(mask)
+                action_id = int(np.random.choice(choices if len(choices) else np.arange(action_dim())))
+                q_mean, q_max = np.nan, np.nan
             action = get_action(action_id)
+
             new_inds, new_sols = [], []
             for i, ind in enumerate(self.population.individuals):
                 mutant = mutate(ind, action["F"], action["mutation_strategy"], self.population.individuals, i, self.ctx)
@@ -75,11 +88,11 @@ class DQNCRMode(BaseOptimizer):
                 trial_sol, rep_ind = evaluate_individual(trial, self.ctx, repair_strategy=action)
                 if rep_ind is not None:
                     trial = rep_ind
-                    trial_sol, _ = evaluate_individual(trial, self.ctx, repair_strategy=action)
                 winner, winner_sol, _ = select_better(trial, trial_sol, ind, self.population.solutions[i])
                 _copy_solution_metrics(winner, winner_sol)
                 new_inds.append(winner)
                 new_sols.append(winner_sol)
+
             self.population.individuals = new_inds
             self.population.solutions = new_sols
             self.archive.update(new_sols)
@@ -95,6 +108,7 @@ class DQNCRMode(BaseOptimizer):
             if self.agent is not None:
                 self.agent.replay.add(state, action_id, reward, next_state, gen == self.Tmax - 1)
                 loss = self.agent.train_step()
+
             row = {
                 "generation": gen + 1,
                 "action_id": action_id,
@@ -105,11 +119,23 @@ class DQNCRMode(BaseOptimizer):
             row.update({
                 "epsilon": self.agent.epsilon(gen) if self.agent is not None else np.nan,
                 "loss": loss if loss is not None else np.nan,
-                "FR": metrics["FR"],
-                "CV_mean": metrics["CV_mean"],
+                "q_mean": q_mean,
+                "q_max": q_max,
+                "target_updated": bool(getattr(self.agent, "target_updated", False)) if self.agent is not None else False,
+                "action_mask_used": bool(self.config.get("dqn", {}).get("action_mask_enabled", True)),
+                "FR_after_repair": metrics["FR"],
+                "CV_after_repair": metrics["CV_mean"],
                 "HV": metrics["HV"],
+                "coverage_best": metrics["best_coverage"],
+                "rsum_actual_best": self.convergence_history["rsum_actual_best"][-1] if self.convergence_history["rsum_actual_best"] else 0.0,
+                "rsum_capacity_best": self.convergence_history["rsum_capacity_best"][-1] if self.convergence_history["rsum_capacity_best"] else 0.0,
+                "archive_size": len(self.archive),
+                "pareto_count": self.convergence_history["pareto_count"][-1] if self.convergence_history["pareto_count"] else 0,
             })
             self.training_log.append(row)
+
+            hv_stall = hv_stall + 1 if metrics["HV"] <= prev_hv + 1.0e-12 else 0
+            prev_hv = metrics["HV"]
             prev_metrics = metrics
             if gen % 10 == 0 or gen == self.Tmax - 1:
                 logger.info(
@@ -124,7 +150,6 @@ class DQNCRMode(BaseOptimizer):
         metrics = record_generation(self.convergence_history, self.population, self.archive, self.config)
         if metrics.get("saturated_link_ratio", 0.0) > 0.9:
             logger.warning("Throughput actual is saturated; Pareto front may degenerate.")
-
 
     def _metrics(self):
         sols = self.population.solutions

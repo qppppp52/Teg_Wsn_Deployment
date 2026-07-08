@@ -1,4 +1,4 @@
-dqn:
+﻿dqn:
   enabled: true
   state_dim: auto
   action_dim: auto
@@ -15,3 +15,7 @@ dqn:
   train_every: 1
   reward_clip: [-1.0, 1.0]
   save_model: true
+  use_double_dqn: true
+  grad_clip_norm: 5.0
+  reward_normalization: true
+  action_mask_enabled: true
