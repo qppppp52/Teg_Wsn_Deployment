@@ -81,6 +81,9 @@
 
   priority_noise_std: 0.03
   save_checkpoint: true
+  load_checkpoint_if_exists: true
   checkpoint_path: experiments/checkpoints/drl_init_policy.pt
   save_training_log: true
   save_generated_population: true
+
+

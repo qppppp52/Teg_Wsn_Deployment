@@ -1,6 +1,7 @@
 ﻿"""Population generator for PPO-initialized CR-MODE."""
 from __future__ import annotations
 
+import json
 import os
 import time
 import numpy as np
@@ -11,7 +12,7 @@ from src.rl_init.heuristic_initializer import create_composite_heuristic_individ
 from src.rl_init.init_evaluator import evaluate_init_individual
 from src.rl_init.diversity_filter import filter_population_by_diversity
 from src.rl_init.logger import save_rows
-from src.rl_init.checkpoint import save_policy
+from src.rl_init.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.logger import get_logger
 
 logger = get_logger("DRLInitPopulationGenerator")
@@ -29,6 +30,8 @@ class DRLInitPopulationGenerator:
         self.init_metrics = []
         self.accepted_counts = {"drl": 0, "heuristic": 0, "random": 0}
         self.policy_path = ""
+        self.loaded_checkpoint = False
+        self.generation_seconds = 0.0
 
     def train(self):
         if self.trainer is not None:
@@ -36,13 +39,32 @@ class DRLInitPopulationGenerator:
         try:
             from src.rl_init.ppo_trainer import PPOTrainer
             self.trainer = PPOTrainer(self.ctx, self.config)
+            checkpoint_path = self.cfg.get("checkpoint_path", "experiments/checkpoints/drl_init_policy.pt")
+            if self.cfg.get("load_checkpoint_if_exists", True) and load_checkpoint(self.trainer.agent, checkpoint_path):
+                self.loaded_checkpoint = True
+                self.policy_path = checkpoint_path
+                self.training_log = [{
+                    "episode": -1,
+                    "step": 0,
+                    "episode_reward": 0.0,
+                    "loss": 0.0,
+                    "policy_loss": 0.0,
+                    "value_loss": 0.0,
+                    "entropy": 0.0,
+                    "loaded_checkpoint": True,
+                }]
+                self.train_seconds = 0.0
+                return self.training_log
             self.training_log = self.trainer.train()
+            self.loaded_checkpoint = False
             self.train_seconds = self.trainer.train_seconds
+            for row in self.training_log:
+                row.setdefault("loaded_checkpoint", False)
             if self.cfg.get("save_checkpoint", True):
-                self.policy_path = save_policy(self.trainer.agent.policy, self.cfg.get("checkpoint_path", "experiments/checkpoints/drl_init_policy.pt"))
+                self.policy_path = save_checkpoint(self.trainer.agent, checkpoint_path)
         except ImportError as exc:
             logger.warning(f"PyTorch unavailable; DRL initializer will use heuristic/random fallback: {exc}")
-            self.training_log = []
+            self.training_log = [{"loaded_checkpoint": False, "fallback_reason": "torch_unavailable"}]
             self.train_seconds = 0.0
         return self.training_log
 
@@ -109,10 +131,12 @@ class DRLInitPopulationGenerator:
                 "feasible": sol.feasible,
                 "cv": sol.cv,
                 "coverage": sol.coverage,
-                "rsum": sol.throughput,
-                "throughput_actual": sol.metadata.get("throughput_actual", sol.throughput),
-                "throughput_capacity": sol.metadata.get("throughput_capacity", sol.throughput),
+                "rsum_actual": sol.metadata.get("throughput_actual", sol.throughput),
+                "rsum_capacity": sol.metadata.get("throughput_capacity", sol.throughput),
                 "repair_iter": getattr(sol, "repair_iter", 0),
+                "active_sensors": int(np.sum(sol.x)),
+                "active_aps": int(np.sum(sol.y)),
+                "diversity_score": 0.0,
             })
         self.generation_seconds = time.time() - start
         return population
@@ -132,3 +156,15 @@ class DRLInitPopulationGenerator:
         data_dir = os.path.join(output_dir, "data")
         save_rows(self.training_log, os.path.join(data_dir, "drl_init_training_log.csv"))
         save_rows(self.init_metrics, os.path.join(data_dir, "init_population_metrics.csv"))
+        os.makedirs(data_dir, exist_ok=True)
+        summary = {
+            "drl_training_time": self.train_seconds,
+            "generation_seconds": self.generation_seconds,
+            "loaded_checkpoint": self.loaded_checkpoint,
+            "checkpoint_path": self.policy_path,
+            "accepted_drl_count": self.accepted_counts.get("drl", 0),
+            "accepted_heuristic_count": self.accepted_counts.get("heuristic", 0),
+            "accepted_random_count": self.accepted_counts.get("random", 0),
+        }
+        with open(os.path.join(data_dir, "drl_init_summary.json"), "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)

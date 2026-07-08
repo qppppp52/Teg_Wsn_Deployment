@@ -4,27 +4,29 @@ from __future__ import annotations
 try:
     import torch
     import torch.nn as nn
-    import torch.nn.functional as F
     from torch.distributions import Categorical
 except ImportError:  # pragma: no cover
     torch = None
     nn = None
-    F = None
     Categorical = None
 
 from src.rl_init.action_space import NUM_ROLES, unflatten_action
 
 
 class CandidateAttentionEncoder(nn.Module if nn is not None else object):
-    def __init__(self, candidate_dim, global_dim, hidden_dim=128, dropout=0.1):
+    def __init__(self, candidate_dim, global_dim, hidden_dim=128, dropout=0.1, num_heads=4):
         if nn is None:
             raise ImportError("PyTorch is required for CandidateAttentionEncoder")
         super().__init__()
+        num_heads = max(1, int(num_heads))
+        if hidden_dim % num_heads != 0:
+            num_heads = 1
         self.candidate_mlp = nn.Sequential(
             nn.Linear(candidate_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
         )
         self.global_mlp = nn.Sequential(nn.Linear(global_dim, hidden_dim), nn.ReLU())
+        self.attention = nn.MultiheadAttention(hidden_dim, num_heads=num_heads, dropout=dropout, batch_first=True)
         self.fuse = nn.Sequential(nn.Linear(hidden_dim * 2, hidden_dim), nn.ReLU())
 
     def forward(self, candidate_features, global_features):
@@ -32,14 +34,16 @@ class CandidateAttentionEncoder(nn.Module if nn is not None else object):
         glob = self.global_mlp(global_features)
         if glob.dim() == 1:
             glob = glob.unsqueeze(0)
-        glob_expanded = glob.unsqueeze(1).expand(-1, cand.shape[1], -1)
-        fused = self.fuse(torch.cat([cand, glob_expanded], dim=-1))
+        query = glob.unsqueeze(1)
+        attended_global, _ = self.attention(query=query, key=cand, value=cand, need_weights=False)
+        context = attended_global.expand(-1, cand.shape[1], -1)
+        fused = self.fuse(torch.cat([cand, context], dim=-1))
         pooled = fused.mean(dim=1)
         return fused, pooled
 
 
 class InitActorCritic(nn.Module if nn is not None else object):
-    def __init__(self, candidate_feature_dim, global_feature_dim, hidden_dim=128, dropout=0.1):
+    def __init__(self, candidate_feature_dim, global_feature_dim, hidden_dim=128, dropout=0.1, attention_dim=None):
         if nn is None:
             raise ImportError("PyTorch is required for InitActorCritic")
         super().__init__()

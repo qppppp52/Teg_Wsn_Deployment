@@ -32,7 +32,10 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
         max_repair_iter=int(env.cfg.get("max_repair_iter", env.ctx.config.get("constraints", {}).get("max_repair_iter", 5))),
     )
     coverage = float(getattr(solution, "coverage", 0.0))
-    rsum = float(solution.metadata.get("throughput_actual", getattr(solution, "throughput", 0.0)))
+    rsum_actual = float(solution.metadata.get("throughput_actual", getattr(solution, "throughput", 0.0)))
+    rsum_capacity = float(solution.metadata.get("throughput_capacity", getattr(solution, "throughput", 0.0)))
+    metric = env.config.get("objectives", {}).get("throughput_metric", "actual")
+    rsum = rsum_capacity if metric == "capacity" else rsum_actual
     rsum_ref = max(float(norm_cfg.get("rsum_ref_max", 2.0e7)), 1.0e-12)
     cv = float(getattr(solution, "cv", 0.0))
     cv_ref = max(float(norm_cfg.get("cv_ref", 10.0)), 1.0e-12)
@@ -56,6 +59,9 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
     metrics = {
         "coverage": coverage,
         "rsum": rsum,
+        "rsum_actual": rsum_actual,
+        "rsum_capacity": rsum_capacity,
+        "throughput_metric": metric,
         "cv": cv,
         "feasible": feasible,
         "repair_iter": repair_iter,
