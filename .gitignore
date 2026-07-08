@@ -54,3 +54,6 @@ results/
 *.prof
 *.lprof
 
+
+# Experiment batch outputs
+experiments/

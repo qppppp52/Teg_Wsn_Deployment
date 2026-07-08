@@ -10,6 +10,7 @@ class ProblemContext:
         self.candidate_points_full: np.ndarray = None
         self.target_coords: np.ndarray = None
         self.T_r: np.ndarray = None
+        self.temperature_stats: dict = None
         self.delta_T: np.ndarray = None
         self.P_grid: np.ndarray = None
         self.coverage_matrix: np.ndarray = None

@@ -1,4 +1,5 @@
 constraints:
+  feasible_tol: 1.0e-8
   cv_improvement_tol: 1.0e-06
   cv_normalization:
     enabled: true
@@ -18,3 +19,12 @@ constraints:
   - energy
   - heatsink
   - ap_service
+
+  cv_pressure_refs:
+    deploy: 1.0
+    link: 10.0
+    capacity: 10.0
+    energy: 1.0
+    sink: 10.0
+    service: 5.0
+    total: 20.0

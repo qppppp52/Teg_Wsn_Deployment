@@ -1,0 +1,41 @@
+﻿space:
+  shape: cube
+  Lx: 3.0
+  Ly: 3.0
+  Lz: 3.0
+
+discretization:
+  candidate_mode: grid
+  grid_spacing: 0.75
+
+deployment:
+  max_sensors: 10
+  max_aps: 2
+
+targets:
+  distribution: random
+  num_targets: 40
+  sensing_radius: 0.8
+  seed: 42
+
+temperature:
+  model: center_air_convection_synthetic
+  ambient: 295.15
+  source_temperature: 343.15
+  source_position: [1.5, 1.5, 1.5]
+  source_radius: 0.25
+  decay_length: 0.95
+  buoyancy_strength: 0.45
+  face_heat_multipliers:
+    Top: 1.22
+    Bottom: 0.72
+    Left: 0.88
+    Right: 1.04
+    Front: 1.12
+    Back: 0.84
+  plume_direction: [0.25, 0.10, 1.0]
+  plume_strength: 0.22
+  min_wall_temperature: 296.15
+  max_wall_temperature: 343.15
+  min_surface_temp_std: 1.5
+  min_surface_temp_range: 5.0

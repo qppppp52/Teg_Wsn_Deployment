@@ -10,6 +10,9 @@ from src.preprocessing.iterative_candidate_filter import iterative_filter
 from src.heatsink.neighborhood import compute_neighborhoods
 from src.utils.index_mapping import IndexMapping
 from src.model.problem_context import ProblemContext
+from src.utils.logger import get_logger
+
+logger = get_logger("preprocessor")
 
 
 def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
@@ -18,6 +21,7 @@ def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
     K = len(cand)
 
     T_r = compute_temperature(scenario, config)
+    temperature_stats = _temperature_diagnostics(cand, T_r, config)
 
     teg_cfg = config.get("teg", {})
     delta_T = compute_delta_T(T_r, config)
@@ -51,6 +55,7 @@ def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
     ctx.candidate_points_full = cand
     ctx.target_coords = scenario.target_points
     ctx.T_r = T_r
+    ctx.temperature_stats = temperature_stats
     ctx.delta_T = delta_T
     ctx.P_grid = P_grid
     ctx.coverage_matrix = coverage_mat
@@ -68,3 +73,31 @@ def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
     ctx.config = config
     ctx.Rs = Rs
     return ctx
+
+
+def _temperature_diagnostics(candidate_points, T_wall, config):
+    face_names = ["Top", "Bottom", "Front", "Back", "Left", "Right"]
+    faces = candidate_points[:, 3].astype(int)
+    stats = {
+        "Twall_min": float(np.min(T_wall)),
+        "Twall_max": float(np.max(T_wall)),
+        "Twall_mean": float(np.mean(T_wall)),
+        "Twall_std": float(np.std(T_wall)),
+        "Twall_range": float(np.max(T_wall) - np.min(T_wall)),
+    }
+    for face_id, face_name in enumerate(face_names):
+        mask = faces == face_id
+        stats[f"{face_name}_mean"] = float(np.mean(T_wall[mask])) if np.any(mask) else float("nan")
+    tcfg = config.get("temperature", {})
+    min_std = float(tcfg.get("min_surface_temp_std", 0.0))
+    min_range = float(tcfg.get("min_surface_temp_range", 0.0))
+    if (stats["Twall_std"] < min_std or stats["Twall_range"] < min_range or
+            stats.get("Top_mean", 0.0) <= stats.get("Bottom_mean", 0.0)):
+        logger.warning("Temperature field is too uniform for algorithm comparison.")
+    logger.info(
+        "Temperature diagnostics: "
+        f"min={stats['Twall_min']:.2f}K max={stats['Twall_max']:.2f}K "
+        f"std={stats['Twall_std']:.2f}K range={stats['Twall_range']:.2f}K "
+        f"Top={stats['Top_mean']:.2f}K Bottom={stats['Bottom_mean']:.2f}K"
+    )
+    return stats

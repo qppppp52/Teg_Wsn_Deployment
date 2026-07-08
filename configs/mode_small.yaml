@@ -1,0 +1,19 @@
+﻿mode:
+  population_size: 30
+  max_generations: 60
+  archive_max_size: 100
+  F_init: 0.5
+  F_min: 0.3
+  F_max: 0.9
+  crossover_rate_init: 0.8
+  crossover_rate_min: 0.1
+  crossover_rate_max: 0.9
+  mutation_strategy: rand_1
+  initialization: mixed
+  power_strategy: energy_balanced
+  repair_strategy: balanced
+
+evaluation:
+  rsum_ref_min: 0.0
+  rsum_ref_max: 2.0e7
+  hv_reference: [0.0, 0.0]

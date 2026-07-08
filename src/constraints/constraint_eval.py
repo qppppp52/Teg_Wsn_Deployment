@@ -22,11 +22,13 @@ def evaluate_all_constraints(solution, ctx):
     ws = weights.get("sink", 1.0)
     wsv = weights.get("service", 1.0)
     total = wd*cv_d + wl*cv_l + wc*cv_c + we*cv_e + ws*cv_s + wsv*cv_sv
+    solution.cv_deploy = cv_d
     solution.cv_energy = cv_e
     solution.cv_link = cv_l
     solution.cv_capacity = cv_c
     solution.cv_sink = cv_s
     solution.cv_service = cv_sv
     solution.cv = total
-    solution.feasible = (total < 0.05)
+    feasible_tol = float(cfg.get("feasible_tol", 1.0e-8))
+    solution.feasible = (total <= feasible_tol)
     return total

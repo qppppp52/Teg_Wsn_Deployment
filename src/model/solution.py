@@ -19,12 +19,21 @@ class Solution:
         self.coverage = 0.0
         self.throughput = 0.0
         self.cv = float("inf")
+        self.cv_deploy = 0.0
         self.cv_energy = 0.0
         self.cv_link = 0.0
         self.cv_capacity = 0.0
         self.cv_sink = 0.0
         self.cv_service = 0.0
         self.feasible = False
+        self.cv_before_repair = float("inf")
+        self.feasible_before_repair = False
+        self.cv_after_repair = float("inf")
+        self.feasible_after_repair = False
+        self.repair_iter = 0
+        self.repair_success = False
+        self.repair_strategy = None
+        self.repair_order = []
         self.objectives = np.zeros(2)
         self.metadata = {}
 
@@ -45,11 +54,21 @@ class Solution:
         new.coverage = self.coverage
         new.throughput = self.throughput
         new.cv = self.cv
+        new.cv_deploy = self.cv_deploy
         new.cv_energy = self.cv_energy
         new.cv_link = self.cv_link
         new.cv_capacity = self.cv_capacity
         new.cv_sink = self.cv_sink
         new.cv_service = self.cv_service
         new.feasible = self.feasible
+        new.cv_before_repair = self.cv_before_repair
+        new.feasible_before_repair = self.feasible_before_repair
+        new.cv_after_repair = self.cv_after_repair
+        new.feasible_after_repair = self.feasible_after_repair
+        new.repair_iter = self.repair_iter
+        new.repair_success = self.repair_success
+        new.repair_strategy = self.repair_strategy
+        new.repair_order = list(self.repair_order)
         new.objectives = self.objectives.copy()
+        new.metadata = dict(self.metadata)
         return new

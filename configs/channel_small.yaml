@@ -1,0 +1,18 @@
+﻿channel:
+  bandwidth: 1000000.0
+  carrier_frequency: 2400000000.0
+  fading:
+    fix_seed: true
+    k: 3.0
+    model: k_mu
+    mu: 2.0
+  noise_figure: 5.0
+  noise_power_density: 1.0e-12
+  p_tx_max: 0.5
+  path_loss_alpha: 2.0
+  snr_threshold: 10.0
+  use_data_rate_cap: false
+  sensor_data_rate_bps: 2000000.0
+
+objectives:
+  throughput_metric: actual

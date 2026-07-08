@@ -12,7 +12,15 @@ def repair_power(solution, ctx):
     - 更新 sensor_power_consumption 以反映新功率
     """
     K = ctx.num_candidates
-    strategy = ctx.config.get("mode", {}).get("power_strategy", "energy_balanced")
+    strategy = getattr(ctx, "current_power_policy", None)
+    if strategy is None:
+        strategy = solution.metadata.get("power_policy")
+    if strategy is None:
+        strategy = ctx.config.get("mode", {}).get("power_strategy", "energy_balanced")
+    if strategy == "balanced":
+        strategy = "energy_balanced"
+    if strategy == "sink_limited":
+        strategy = "conservative"
     scfg = ctx.config.get("sensor", {})
     P_fixed = scfg.get("P_sens", 0.01) + scfg.get("P_proc", 0.005)
     acfg = ctx.config.get("ap", {})

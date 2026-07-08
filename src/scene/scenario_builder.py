@@ -24,6 +24,11 @@ class Scenario:
 
         tcfg = self.config.get("targets", {})
         num = tcfg.get("num_targets", 100)
-        self.target_points = generate_random_targets(num, self.space.Lx, self.space.Ly, self.space.Lz)
+        seed = tcfg.get("seed", self.config.get("experiment", {}).get("seeds", [42])[0])
+        margin = tcfg.get("margin", 0.1)
+        self.target_points = generate_random_targets(
+            num, self.space.Lx, self.space.Ly, self.space.Lz,
+            margin=margin, seed=seed
+        )
         self.num_targets = len(self.target_points)
         return self

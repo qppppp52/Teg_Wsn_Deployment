@@ -1,0 +1,59 @@
+﻿ap:
+  C_max: 10
+  P_idle: 0.05
+  P_proc: 0.02
+  P_rx: 0.003
+
+sensor:
+  P_sens: 0.01
+  P_proc: 0.005
+
+teg:
+  model_type: thermal_resistance
+  thermal_resistance:
+    R_TEG: 0.12
+    R_int: 0.8
+    T_amb: 295.15
+    eta: 0.8
+    h_sink: 50.0
+    sigma: 0.12
+
+heatsink:
+  neighbor_order: 1
+  allow_node_node_overlap: false
+  allow_self_node_sink_overlap: true
+  allow_sink_on_other_node: false
+  allow_sink_outside_neighborhood: false
+  allow_sink_sink_overlap: false
+  count_self_grid_as_sink: true
+  default_allocation_strategy: balanced
+
+constraints:
+  feasible_tol: 1.0e-8
+  cv_improvement_tol: 1.0e-6
+  cv_normalization:
+    enabled: true
+  cv_weights:
+    deploy: 0.1
+    link: 0.1
+    capacity: 0.1
+    energy: 0.1
+    sink: 0.1
+    service: 0.1
+  early_stop_if_cv_not_decrease: true
+  max_repair_iter: 5
+  repair_order_default:
+    - deployment
+    - link
+    - power
+    - energy
+    - heatsink
+    - ap_service
+  cv_pressure_refs:
+    deploy: 1.0
+    link: 10.0
+    capacity: 10.0
+    energy: 1.0
+    sink: 10.0
+    service: 5.0
+    total: 20.0

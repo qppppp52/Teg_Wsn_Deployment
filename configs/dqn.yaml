@@ -1,0 +1,17 @@
+dqn:
+  enabled: true
+  state_dim: auto
+  action_dim: auto
+  hidden_dims: [128, 128]
+  gamma: 0.95
+  lr: 0.001
+  batch_size: 64
+  replay_capacity: 5000
+  min_replay_size: 200
+  target_update_interval: 10
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_generations: 80
+  train_every: 1
+  reward_clip: [-1.0, 1.0]
+  save_model: true

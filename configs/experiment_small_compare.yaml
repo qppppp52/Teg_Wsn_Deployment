@@ -1,0 +1,23 @@
+﻿experiment:
+  name: small_center_heat_compare
+  algorithms:
+    - cr_mode
+    - dqn_cr_mode
+    - drl_init_cr_mode
+  seeds: [42, 43, 44]
+  num_runs: 3
+  objective_direction: maximize
+  save_figures: true
+  save_csv: true
+  save_pareto: true
+  save_raw: true
+  plot_format: png
+  dpi: 150
+
+config_files:
+  scene: configs/scene_small_center_heat.yaml
+  mode: configs/mode_small.yaml
+  channel: configs/channel_small.yaml
+  constraints: configs/constraints_small.yaml
+  dqn: configs/dqn.yaml
+  drl_init: configs/drl_init.yaml
