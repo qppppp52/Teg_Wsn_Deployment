@@ -1,0 +1,20 @@
+constraints:
+  cv_improvement_tol: 1.0e-06
+  cv_normalization:
+    enabled: true
+  cv_weights:
+    capacity: 0.1
+    deploy: 0.1
+    energy: 0.1
+    link: 0.1
+    service: 0.1
+    sink: 0.1
+  early_stop_if_cv_not_decrease: true
+  max_repair_iter: 5
+  repair_order_default:
+  - deployment
+  - link
+  - power
+  - energy
+  - heatsink
+  - ap_service

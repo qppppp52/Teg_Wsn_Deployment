@@ -1,0 +1,9 @@
+heatsink:
+  allow_node_node_overlap: false
+  allow_self_node_sink_overlap: true
+  allow_sink_on_other_node: false
+  allow_sink_outside_neighborhood: false
+  allow_sink_sink_overlap: false
+  count_self_grid_as_sink: true
+  default_allocation_strategy: balanced
+  neighbor_order: 1

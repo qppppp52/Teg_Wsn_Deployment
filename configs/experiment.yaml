@@ -1,0 +1,12 @@
+experiment:
+  algorithms:
+  - cr_mode
+  dpi: 150
+  num_runs: 1
+  objective_direction: maximize
+  plot_format: png
+  save_figures: true
+  save_pareto: true
+  save_raw: true
+  seeds:
+  - 42

@@ -1,0 +1,30 @@
+﻿deployment:
+  max_aps: 3
+  max_sensors: 15
+discretization:
+  candidate_mode: grid
+  grid_spacing: 1.0
+space:
+  Lx: 5.0
+  Ly: 5.0
+  Lz: 5.0
+  shape: cube
+targets:
+  distribution: random
+  num_targets: 80
+  sensing_radius: 1.5
+temperature:
+  R_heat: 3.0
+  T_max: 373.15
+  ambient: 295.15
+  decay: 2.0
+  fixed_source_faces:
+  - Left
+  model: local_surface_max
+  n_sources_max: 1
+  n_sources_min: 1
+  source_temperature: 373.15
+
+
+
+

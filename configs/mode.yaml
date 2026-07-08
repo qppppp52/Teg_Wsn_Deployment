@@ -1,0 +1,14 @@
+﻿mode:
+  F_init: 0.5
+  F_max: 0.9
+  F_min: 0.3
+  archive_max_size: 200
+  crossover_rate_init: 0.8
+  crossover_rate_max: 0.9
+  crossover_rate_min: 0.1
+  max_generations: 100
+  mutation_strategy: standard_rand
+  population_size: 80
+  power_strategy: energy_balanced
+  repair_strategy: balanced
+

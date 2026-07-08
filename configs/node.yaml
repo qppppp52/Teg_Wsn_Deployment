@@ -1,0 +1,8 @@
+ap:
+  C_max: 10
+  P_idle: 0.05
+  P_proc: 0.02
+  P_rx: 0.003
+sensor:
+  P_proc: 0.005
+  P_sens: 0.01

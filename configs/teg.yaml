@@ -1,0 +1,12 @@
+teg:
+  model_type: thermal_resistance
+  simplified:
+    Tc: 295.15
+    k_teg: 0.001
+  thermal_resistance:
+    R_TEG: 0.12
+    R_int: 0.8
+    T_amb: 295.15
+    eta: 0.8
+    h_sink: 50.0
+    sigma: 0.12

@@ -1,0 +1,6 @@
+data_dir: data/
+enable_cache: false
+output_dir: results/
+save_figures: true
+save_logs: true
+seed: 42
