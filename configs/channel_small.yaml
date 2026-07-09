@@ -8,12 +8,11 @@
     mu: 2.0
   noise_figure: 5.0
   noise_power_density: 1.0e-12
-  p_tx_max: 0.2
-  path_loss_alpha: 2.4
-  snr_threshold: 12.0
+  p_tx_max: 0.15
+  path_loss_alpha: 2.5
+  snr_threshold: 14.0
   use_data_rate_cap: false
   sensor_data_rate_bps: 2000000.0
 
 objectives:
   throughput_metric: actual
-

@@ -12,7 +12,7 @@ from src.operators.mode_crossover import crossover
 from src.operators.mode_selection import select_better
 from src.evaluator.individual_evaluator import evaluate_individual
 from src.dqn.action_space import ACTIONS, get_action, action_dim
-from src.dqn.action_mask import build_dqn_action_mask
+from src.dqn.action_mask import build_dqn_action_mask, action_mask_diagnostics
 from src.dqn.state_builder import build_state
 from src.dqn.reward_function import compute_reward
 from src.evaluation.diversity import objective_space_diversity
@@ -72,9 +72,10 @@ class DQNCRMode(BaseOptimizer):
             mask_metrics = dict(prev_metrics)
             mask_metrics["hv_stall_generations"] = hv_stall
             mask = build_dqn_action_mask(mask_metrics, ACTIONS, self.config)
+            mask_diag = action_mask_diagnostics(mask, ACTIONS, mask_metrics)
             if self.agent is not None:
                 action_id = self.agent.select_action(state, gen, action_mask=mask)
-                q_mean, q_max = self.agent.q_stats(state, mask)
+                q_mean, q_max = self.agent.q_stats(state, action_mask=mask)
             else:
                 choices = np.flatnonzero(mask)
                 action_id = int(np.random.choice(choices if len(choices) else np.arange(action_dim())))
@@ -123,6 +124,9 @@ class DQNCRMode(BaseOptimizer):
                 "q_max": q_max,
                 "target_updated": bool(getattr(self.agent, "target_updated", False)) if self.agent is not None else False,
                 "action_mask_used": bool(self.config.get("dqn", {}).get("action_mask_enabled", True)),
+                "num_allowed_actions": mask_diag["num_allowed_actions"],
+                "allowed_action_names": mask_diag["allowed_action_names"],
+                "dominant_pressure": mask_diag["dominant_pressure"],
                 "FR_after_repair": metrics["FR"],
                 "CV_after_repair": metrics["CV_mean"],
                 "HV": metrics["HV"],

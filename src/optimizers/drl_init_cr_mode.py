@@ -16,6 +16,7 @@ class DRLInitCRMode(CRMode):
         self.init_generation_seconds = 0.0
         self.init_policy_path = ""
         self.accepted_counts = {"drl": 0, "heuristic": 0, "random": 0}
+        self.loaded_checkpoint = False
 
     def initialize_population(self):
         generator = DRLInitPopulationGenerator(self.ctx, self.config)
@@ -26,5 +27,6 @@ class DRLInitCRMode(CRMode):
         self.init_generation_seconds = float(getattr(generator, "generation_seconds", 0.0))
         self.init_policy_path = generator.policy_path
         self.accepted_counts = generator.accepted_counts
+        self.loaded_checkpoint = bool(getattr(generator, "loaded_checkpoint", False))
         generator.save_artifacts(self.config.get("runtime", {}).get("output_dir", "results"))
         return population

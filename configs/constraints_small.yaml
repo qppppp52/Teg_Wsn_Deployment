@@ -1,12 +1,12 @@
 ﻿ap:
-  C_max: 6
-  P_idle: 0.05
-  P_proc: 0.02
-  P_rx: 0.003
+  C_max: 5
+  P_idle: 0.065
+  P_proc: 0.028
+  P_rx: 0.0045
 
 sensor:
-  P_sens: 0.01
-  P_proc: 0.005
+  P_sens: 0.014
+  P_proc: 0.008
 
 teg:
   model_type: thermal_resistance
@@ -14,7 +14,7 @@ teg:
     R_TEG: 0.12
     R_int: 0.8
     T_amb: 295.15
-    eta: 0.65
+    eta: 0.60
     h_sink: 50.0
     sigma: 0.12
 

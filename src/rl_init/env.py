@@ -72,7 +72,14 @@ class InitDeploymentEnv:
         if self.done:
             terminal_reward, metrics = compute_terminal_reward(self, self.cfg.get("reward", {}), self.cfg.get("normalization", {}))
             self.last_eval_metrics = {k: v for k, v in metrics.items() if k != "solution"}
-            info.update(self.last_eval_metrics)
+            terminal_info = dict(self.last_eval_metrics)
+            terminal_info.update({
+                "terminal_reward": float(terminal_reward),
+                "num_sensors": len(self.selected_sensors),
+                "num_aps": len(self.selected_aps),
+                "invalid_action_count": int(self.invalid_action_count),
+            })
+            info.update(terminal_info)
             reward += terminal_reward
         self._last_summary = new_summary
         return build_init_state(self), float(reward), bool(self.done), info

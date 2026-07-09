@@ -40,4 +40,6 @@ def test_drl_init_cr_mode_smoke():
     run_experiment(cfg, "drl_init_cr_mode", str(out_dir), 42)
     assert (out_dir / "data" / "convergence.csv").exists()
     assert (out_dir / "data" / "init_population_metrics.csv").exists()
+    assert (out_dir / "data" / "drl_init_summary.json").exists()
+    assert (out_dir / "data" / "pareto_solutions.csv").exists()
 

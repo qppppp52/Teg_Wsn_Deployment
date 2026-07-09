@@ -176,7 +176,7 @@ def run_compare_experiment(config):
     seeds = exp.get("seeds", [42])[: int(exp.get("num_runs", len(exp.get("seeds", [42]))))]
     summaries = []
     histories = {}
-    pareto_by_algorithm = {}
+    pareto_by_algorithm = {"actual": {}, "capacity": {}}
 
     for algorithm in algorithms:
         for seed in seeds:
@@ -184,16 +184,20 @@ def run_compare_experiment(config):
             archive, summary, history = run_experiment(config, algorithm, out_dir, seed)
             summaries.append(summary)
             histories[(algorithm, seed)] = history
-            pareto_by_algorithm.setdefault(algorithm, []).append(archive.get_feasible_objectives())
+            pareto_by_algorithm["actual"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "throughput_actual"))
+            pareto_by_algorithm["capacity"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "throughput_capacity"))
 
     os.makedirs(os.path.join(root, "figures"), exist_ok=True)
     _save_summary_csv(summaries, os.path.join(root, "summary_all_algorithms.csv"))
     _save_recommended_all_csv(summaries, os.path.join(root, "recommended_solutions_all_algorithms.csv"))
-    _plot_pareto_compare(pareto_by_algorithm, os.path.join(root, "figures", "pareto_compare_all.png"))
+    _plot_pareto_compare(pareto_by_algorithm["actual"], os.path.join(root, "figures", "pareto_compare_actual.png"), "Rsum actual (Mbps)")
+    _plot_pareto_compare(pareto_by_algorithm["capacity"], os.path.join(root, "figures", "pareto_compare_capacity.png"), "Rsum capacity (Mbps)")
+    _plot_pareto_compare(pareto_by_algorithm["actual"], os.path.join(root, "figures", "pareto_compare_all.png"), "Rsum actual (Mbps)")
     _plot_history_compare(histories, "HV", os.path.join(root, "figures", "hv_compare_all.png"), "Hypervolume")
     _plot_history_compare(histories, "FR_current", os.path.join(root, "figures", "fr_compare_all.png"), "Feasible Ratio")
     logger.info("summary_all_algorithms.csv generated")
-    logger.info("pareto_compare_all.png generated")
+    logger.info("pareto_compare_actual.png generated")
+    logger.info("pareto_compare_capacity.png generated")
 
 
 def _save_convergence_csv(history, path):
@@ -406,7 +410,8 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
             "init_CV_after_repair": float(np.mean(init_cvs)) if init_cvs else float("nan"),
             "init_FR": float(np.mean(init_feasible)) if init_feasible else 0.0,
             "init_CV_mean": float(np.mean(init_cvs)) if init_cvs else float("nan"),
-            "init_diversity": _init_source_diversity(init_metrics),
+            "init_diversity": float(np.mean([float(row.get("diversity_score", 0.0)) for row in init_metrics])) if init_metrics else 0.0,
+            "loaded_checkpoint": bool(getattr(algo, "loaded_checkpoint", False)),
             "accepted_drl_count": int(accepted.get("drl", 0)),
             "accepted_heuristic_count": int(accepted.get("heuristic", 0)),
             "accepted_random_count": int(accepted.get("random", 0)),
@@ -466,24 +471,48 @@ def _save_recommended_all_csv(summaries, path):
             writer.writerow({key: _json_ready(summary).get(key, "") for key in fields})
 
 
-def _plot_pareto_compare(pareto_by_algorithm, out_path):
+def _feasible_metric_points(solutions, metadata_key):
+    feasible = [s for s in solutions if s.feasible]
+    if not feasible:
+        return np.zeros((0, 2), dtype=float)
+    return np.asarray([
+        [float(s.coverage), float(s.metadata.get(metadata_key, s.throughput))]
+        for s in feasible
+    ], dtype=float)
+
+
+def _plot_pareto_compare(pareto_by_algorithm, out_path, ylabel="Rsum (Mbps)"):
     import matplotlib as mpl
     mpl.use("Agg")
     import matplotlib.pyplot as plt
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 5))
-    for algorithm, arrays in pareto_by_algorithm.items():
+    markers = ["o", "s", "^", "D", "P", "X"]
+    for idx, (algorithm, arrays) in enumerate(pareto_by_algorithm.items()):
         pts = np.vstack([a for a in arrays if len(a)]) if any(len(a) for a in arrays) else np.zeros((0, 2))
         if len(pts):
-            ax.scatter(pts[:, 0], pts[:, 1] / 1e6, label=algorithm, s=55)
+            if len(pts) == 1:
+                logger.warning(f"Pareto count is 1 for {algorithm}; front may be degenerate.")
+            ax.scatter(pts[:, 0], pts[:, 1] / 1e6, label=algorithm, s=55, marker=markers[idx % len(markers)])
+            rec_idx = _recommended_point_index(pts)
+            if rec_idx is not None:
+                ax.scatter([pts[rec_idx, 0]], [pts[rec_idx, 1] / 1e6], marker="*", s=170, edgecolors="black", linewidth=1.0)
     ax.set_xlabel("Coverage")
-    ax.set_ylabel("Rsum (Mbps)")
+    ax.set_ylabel(ylabel)
     ax.set_title("Pareto Comparison")
     ax.grid(True, alpha=0.3)
     ax.legend()
     fig.tight_layout()
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
+
+
+def _recommended_point_index(points):
+    if len(points) == 0:
+        return None
+    rmax = max(float(np.max(points[:, 1])), 1.0)
+    norm = np.column_stack([points[:, 0], np.clip(points[:, 1] / rmax, 0.0, 1.0)])
+    return int(np.argmin(np.linalg.norm(1.0 - norm, axis=1)))
 
 
 def _plot_history_compare(histories, key, out_path, ylabel):

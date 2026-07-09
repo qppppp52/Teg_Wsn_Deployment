@@ -40,7 +40,7 @@ class PPOAgent:
 
     def update(self, buffer: RolloutBuffer):
         if len(buffer) == 0:
-            return {"loss": 0.0, "policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0}
+            return {"loss": 0.0, "policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0}
         if not buffer.advantages or not buffer.returns:
             buffer.compute_returns_and_advantages(0.0, self.gamma, self.gae_lambda)
         advantages = torch.as_tensor(buffer.advantages, dtype=torch.float32, device=self.device)
@@ -69,13 +69,15 @@ class PPOAgent:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+                approx_kl = (old_log_probs[idx] - new_log_probs).mean()
                 last_stats = {
                     "loss": float(loss.item()),
                     "policy_loss": float(policy_loss.item()),
                     "value_loss": float(value_loss.item()),
                     "entropy": float(entropy.item()),
+                    "approx_kl": float(approx_kl.item()),
                 }
-        return last_stats or {"loss": 0.0, "policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0}
+        return last_stats or {"loss": 0.0, "policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0}
 
 
 def action_to_id(action: dict) -> int:
