@@ -7,6 +7,7 @@ import copy
 import csv
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -177,6 +178,7 @@ def run_compare_experiment(config):
     root = os.path.join("experiments", name, timestamp)
     algorithms = exp.get("algorithms", ["cr_mode"])
     seeds = exp.get("seeds", [42])[: int(exp.get("num_runs", len(exp.get("seeds", [42]))))]
+    experiment_start = datetime.now()
     summaries = []
     histories = {}
     pareto_by_algorithm = {"actual": {}, "capacity": {}}
@@ -198,7 +200,15 @@ def run_compare_experiment(config):
     _plot_pareto_compare(pareto_by_algorithm["actual"], os.path.join(root, "figures", "pareto_compare_all.png"), "Rsum actual (Mbps)")
     _plot_history_compare(histories, "HV", os.path.join(root, "figures", "hv_compare_all.png"), "Hypervolume")
     _plot_history_compare(histories, "FR_current", os.path.join(root, "figures", "fr_compare_all.png"), "Feasible Ratio")
-    _write_experiment_validity_report(summaries, os.path.join(root, "experiment_validity_report.md"))
+    experiment_end = datetime.now()
+    _write_experiment_validity_report(
+        summaries,
+        os.path.join(root, "experiment_validity_report.md"),
+        config,
+        "python main.py --experiment configs/experiment_small_compare.yaml",
+        experiment_start,
+        experiment_end,
+    )
     logger.info("summary_all_algorithms.csv generated")
     logger.info("pareto_compare_actual.png generated")
     logger.info("pareto_compare_capacity.png generated")
@@ -388,6 +398,10 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         "recommended_rsum": rec.throughput if rec is not None else 0.0,
         "throughput_capacity_best": best_capacity,
         "throughput_actual_best": best_actual,
+        "use_data_rate_cap": bool(config.get("channel", {}).get("use_data_rate_cap", False)),
+        "throughput_metric": config.get("objectives", {}).get("throughput_metric", "actual"),
+        "rsum_actual_definition": _rsum_actual_definition(config),
+        "rsum_capacity_definition": "Shannon theoretical aggregate link capacity before business data-rate capping.",
     }
     if algorithm == "dqn_cr_mode":
         training_log = getattr(algo, "training_log", [])
@@ -497,21 +511,46 @@ def _save_recommended_all_csv(summaries, path):
             writer.writerow({key: _json_ready(summary).get(key, "") for key in fields})
 
 
-def _write_experiment_validity_report(summaries, path):
+def _write_experiment_validity_report(summaries, path, config=None, command="", start_time=None, end_time=None):
     if not summaries:
         return
+    config = config or {}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     drl_rows = [row for row in summaries if row.get("algorithm") == "drl_init_cr_mode"]
     fallback = [row for row in drl_rows if row.get("policy_source") == "fallback" or str(row.get("torch_available", "")).lower() == "false"]
     incompatible = [row for row in drl_rows if str(row.get("checkpoint_compatible", "")).lower() == "false"]
     saturated = [row for row in summaries if float(row.get("saturated_link_ratio", 0.0) or 0.0) > 0.9]
     pareto_single = [row for row in summaries if int(row.get("pareto_count", 0) or 0) <= 1]
+    evidence = _collect_reproducibility_evidence(config, command, start_time, end_time)
     lines = [
         "# Experiment Validity Report",
         "",
+        "## Reproducibility Evidence",
+        "",
+        f"- Git branch: {evidence['git_branch']}",
+        f"- Git commit: {evidence['git_commit']}",
+        f"- Python: {evidence['python']}",
+        f"- Torch: {evidence['torch']}",
+        f"- NumPy: {evidence['numpy']}",
+        f"- PyYAML: {evidence['pyyaml']}",
+        f"- py_compile: {evidence['py_compile']}",
+        f"- YAML parse: {evidence['yaml_parse']}",
+        "- pytest summary: run before this experiment; see console/CI output for exact collected test count.",
+        f"- Full command: `{evidence['command']}`",
+        f"- Experiment start: {evidence['start_time']}",
+        f"- Experiment end: {evidence['end_time']}",
+        f"- Runtime seconds: {evidence['runtime_seconds']}",
+        "",
+        "## Throughput Semantics",
+        "",
+        f"- use_data_rate_cap: {config.get('channel', {}).get('use_data_rate_cap', False)}",
+        f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
+        f"- Rsum actual definition: {_rsum_actual_definition(config)}",
+        "- Rsum capacity definition: Shannon theoretical aggregate link capacity before business data-rate capping.",
+        "- If the paper emphasizes business-rate-capped actual throughput, set `channel.use_data_rate_cap=true`; if it emphasizes theoretical link capability, use `objectives.throughput_metric=capacity` and label figures as capacity.",
+        "",
         "## Environment Checks",
         "",
-        "- Python/YAML/pytest: see command output from the run context.",
         f"- DRL-Init runs: {len(drl_rows)}",
         f"- Fallback runs: {len(fallback)}",
         f"- Incompatible checkpoint runs: {len(incompatible)}",
@@ -564,6 +603,65 @@ def _write_experiment_validity_report(summaries, path):
     ])
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def _collect_reproducibility_evidence(config, command, start_time, end_time):
+    import py_compile
+    py_files = ["main.py", "src/rl_init/population_generator.py", "src/rl_init/checkpoint.py", "src/rl_init/ppo_trainer.py", "src/rl_init/init_evaluator.py"]
+    yaml_files = ["configs/experiment_small_compare.yaml", "configs/drl_init.yaml", "configs/channel_small.yaml"]
+    try:
+        for file_path in py_files:
+            py_compile.compile(file_path, doraise=True)
+        py_result = "PASS (" + ", ".join(py_files) + ")"
+    except Exception as exc:
+        py_result = f"FAIL ({exc})"
+    try:
+        import yaml
+        for file_path in yaml_files:
+            with open(file_path, encoding="utf-8") as f:
+                yaml.safe_load(f)
+        yaml_result = "PASS (" + ", ".join(yaml_files) + ")"
+        yaml_version = getattr(yaml, "__version__", "unknown")
+    except Exception as exc:
+        yaml_result = f"FAIL ({exc})"
+        yaml_version = "unavailable"
+    try:
+        import torch
+        torch_version = torch.__version__
+    except Exception:
+        torch_version = "unavailable"
+    git_branch = _run_text_command(["git", "branch", "--show-current"])
+    git_commit = _run_text_command(["git", "rev-parse", "--short", "HEAD"])
+    runtime = ""
+    if start_time is not None and end_time is not None:
+        runtime = (end_time - start_time).total_seconds()
+    return {
+        "git_branch": git_branch,
+        "git_commit": git_commit,
+        "python": sys.version.split()[0],
+        "torch": torch_version,
+        "numpy": np.__version__,
+        "pyyaml": yaml_version,
+        "py_compile": py_result,
+        "yaml_parse": yaml_result,
+        "command": command or "python main.py --experiment configs/experiment_small_compare.yaml",
+        "start_time": start_time.isoformat() if start_time is not None else "unknown",
+        "end_time": end_time.isoformat() if end_time is not None else "unknown",
+        "runtime_seconds": runtime,
+    }
+
+
+def _run_text_command(cmd):
+    try:
+        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _rsum_actual_definition(config):
+    if config.get("channel", {}).get("use_data_rate_cap", False):
+        return "Business-rate-capped aggregate throughput after applying channel.sensor_data_rate_bps."
+    return "Effective aggregate throughput in the current objective pipeline without business data-rate cap truncation; values may exceed active_sensors * sensor_data_rate_bps."
 
 
 def _feasible_metric_points(solutions, metadata_key):

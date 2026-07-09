@@ -29,11 +29,11 @@ TRAINING_LOG_COLUMNS = [
     "cv_sink", "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "repair_iter",
     "repair_success", "num_sensors", "num_aps", "invalid_action_count", "loss", "policy_loss",
     "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "fallback_reason", "policy_source", "torch_available",
-    "checkpoint_compatible", "checkpoint_skip_reason", "checkpoint_error", "checkpoint_mode", "config_hash",
+    "checkpoint_path", "checkpoint_compatible", "checkpoint_skip_reason", "checkpoint_error", "checkpoint_mode", "config_hash",
 ]
 
 
-def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", policy_source="trained", torch_available=False, checkpoint_compatible=False, checkpoint_skip_reason="", checkpoint_error="", checkpoint_mode="", config_hash=""):
+def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", policy_source="trained", torch_available=False, checkpoint_path="", checkpoint_compatible=False, checkpoint_skip_reason="", checkpoint_error="", checkpoint_mode="", config_hash=""):
     row = {key: np.nan for key in TRAINING_LOG_COLUMNS}
     row.update({
         "episode": -1,
@@ -46,6 +46,7 @@ def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", polic
         "fallback_reason": fallback_reason,
         "policy_source": policy_source,
         "torch_available": torch_available,
+        "checkpoint_path": checkpoint_path,
         "checkpoint_compatible": checkpoint_compatible,
         "checkpoint_skip_reason": checkpoint_skip_reason,
         "checkpoint_error": checkpoint_error,
@@ -103,7 +104,7 @@ class DRLInitPopulationGenerator:
                 self.loaded_checkpoint = True
                 self.policy_source = "loaded_checkpoint"
                 self.training_log = [_training_log_placeholder(
-                    True, "", "loaded_checkpoint", True, True, "", "", self.checkpoint_mode, self.config_hash
+                    True, "", "loaded_checkpoint", True, checkpoint_path, True, "", "", self.checkpoint_mode, self.config_hash
                 )]
                 self.train_seconds = 0.0
                 return self.training_log
@@ -118,6 +119,7 @@ class DRLInitPopulationGenerator:
                 row.setdefault("fallback_reason", "")
                 row.setdefault("policy_source", self.policy_source)
                 row.setdefault("torch_available", self.torch_available)
+                row.setdefault("checkpoint_path", self.policy_path)
                 row.setdefault("checkpoint_compatible", self.checkpoint_compatible)
                 row.setdefault("checkpoint_skip_reason", self.checkpoint_skip_reason)
                 row.setdefault("checkpoint_error", self.checkpoint_error)
@@ -131,7 +133,7 @@ class DRLInitPopulationGenerator:
         except ImportError as exc:
             logger.warning(f"PyTorch unavailable; DRL initializer will use heuristic/random fallback: {exc}")
             self.training_log = [_training_log_placeholder(
-                False, "torch_unavailable", "fallback", False, False, "torch_unavailable", str(exc), self.checkpoint_mode, self.config_hash
+                False, "torch_unavailable", "fallback", False, self.policy_path, False, "torch_unavailable", str(exc), self.checkpoint_mode, self.config_hash
             )]
             self.policy_source = "fallback"
             self.torch_available = False
