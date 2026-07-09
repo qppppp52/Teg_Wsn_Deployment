@@ -24,6 +24,7 @@ class InitDeploymentEnv:
         self.done = False
         self.last_eval_metrics = {}
         self.invalid_action_count = 0
+        self.step_reward_sum = 0.0
         self._last_summary = {}
 
     def reset(self, seed=None) -> dict:
@@ -38,6 +39,7 @@ class InitDeploymentEnv:
         self.done = False
         self.last_eval_metrics = {}
         self.invalid_action_count = 0
+        self.step_reward_sum = 0.0
         self._last_summary = self.render_state_summary()
         return build_init_state(self)
 
@@ -69,12 +71,14 @@ class InitDeploymentEnv:
             self.done = True
         new_summary = self.render_state_summary()
         reward = compute_step_reward(prev_summary, new_summary, info, self.cfg.get("reward", {}))
+        self.step_reward_sum += float(reward)
         if self.done:
             terminal_reward, metrics = compute_terminal_reward(self, self.cfg.get("reward", {}), self.cfg.get("normalization", {}))
             self.last_eval_metrics = {k: v for k, v in metrics.items() if k != "solution"}
             terminal_info = dict(self.last_eval_metrics)
             terminal_info.update({
                 "terminal_reward": float(terminal_reward),
+                "step_reward_sum": float(self.step_reward_sum),
                 "num_sensors": len(self.selected_sensors),
                 "num_aps": len(self.selected_aps),
                 "invalid_action_count": int(self.invalid_action_count),
@@ -150,3 +154,4 @@ class InitDeploymentEnv:
 
     def _deployment_limit(self, key, default):
         return self.config.get("deployment", {}).get(key, default)
+

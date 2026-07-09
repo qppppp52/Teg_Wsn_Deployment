@@ -11,7 +11,7 @@ REQUIRED_COLUMNS = {
     "feasible", "cv", "cv_deploy", "cv_link", "cv_capacity", "cv_energy", "cv_sink",
     "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "repair_iter",
     "repair_success", "num_sensors", "num_aps", "invalid_action_count", "policy_loss",
-    "value_loss", "entropy", "approx_kl", "loaded_checkpoint",
+    "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "policy_source", "torch_available",
 }
 
 
@@ -34,3 +34,4 @@ def test_drl_init_training_log_contains_terminal_columns():
         rows = list(reader)
     assert REQUIRED_COLUMNS.issubset(set(reader.fieldnames or []))
     assert rows
+

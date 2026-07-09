@@ -23,11 +23,11 @@ TRAINING_LOG_COLUMNS = [
     "terminal_reward", "feasible", "cv", "cv_deploy", "cv_link", "cv_capacity", "cv_energy",
     "cv_sink", "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "repair_iter",
     "repair_success", "num_sensors", "num_aps", "invalid_action_count", "loss", "policy_loss",
-    "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "fallback_reason", "policy_source",
+    "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "fallback_reason", "policy_source", "torch_available",
 ]
 
 
-def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", policy_source="trained"):
+def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", policy_source="trained", torch_available=False):
     row = {key: np.nan for key in TRAINING_LOG_COLUMNS}
     row.update({
         "episode": -1,
@@ -39,6 +39,7 @@ def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", polic
         "loaded_checkpoint": loaded_checkpoint,
         "fallback_reason": fallback_reason,
         "policy_source": policy_source,
+        "torch_available": torch_available,
     })
     return row
 
@@ -73,7 +74,7 @@ class DRLInitPopulationGenerator:
                 self.loaded_checkpoint = True
                 self.policy_source = "loaded_checkpoint"
                 self.policy_path = checkpoint_path
-                self.training_log = [_training_log_placeholder(True, "", "loaded_checkpoint")]
+                self.training_log = [_training_log_placeholder(True, "", "loaded_checkpoint", True)]
                 self.train_seconds = 0.0
                 return self.training_log
             self.training_log = self.trainer.train()
@@ -84,11 +85,12 @@ class DRLInitPopulationGenerator:
                 row.setdefault("loaded_checkpoint", False)
                 row.setdefault("fallback_reason", "")
                 row.setdefault("policy_source", self.policy_source)
+                row.setdefault("torch_available", self.torch_available)
             if self.cfg.get("save_checkpoint", True):
                 self.policy_path = save_checkpoint(self.trainer.agent, checkpoint_path)
         except ImportError as exc:
             logger.warning(f"PyTorch unavailable; DRL initializer will use heuristic/random fallback: {exc}")
-            self.training_log = [_training_log_placeholder(False, "torch_unavailable", "fallback")]
+            self.training_log = [_training_log_placeholder(False, "torch_unavailable", "fallback", False)]
             self.policy_source = "fallback"
             self.torch_available = False
             self.train_seconds = 0.0
