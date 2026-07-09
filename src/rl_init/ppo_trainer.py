@@ -17,7 +17,11 @@ class PPOTrainer:
         state = self.env.reset(seed=self.cfg.get("seed", 42))
         self.agent = PPOAgent(state, config)
         self.training_log = []
+        self.training_context = {}
         self.train_seconds = 0.0
+
+    def set_training_context(self, context: dict):
+        self.training_context = dict(context or {})
 
     def train(self):
         start = time.time()
@@ -53,9 +57,11 @@ class PPOTrainer:
                 buffer.compute_returns_and_advantages(0.0, self.agent.gamma, self.agent.gae_lambda)
                 last_stats = self.agent.update(buffer)
                 buffer.clear()
-            self.training_log.append(_episode_log_row(
+            row = _episode_log_row(
                 ep, episode_steps, total_steps, total_reward, step_reward_sum, terminal_info, last_stats
-            ))
+            )
+            row.update(self.training_context)
+            self.training_log.append(row)
         self.train_seconds = time.time() - start
         return self.training_log
 

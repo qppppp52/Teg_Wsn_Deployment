@@ -92,6 +92,13 @@ class DRLInitPopulationGenerator:
             self.policy_path = checkpoint_path
             expected_meta = build_checkpoint_meta(self.trainer.agent, self.ctx, self.config, self.checkpoint_mode)
             self.config_hash = expected_meta.get("config_hash", "")
+            self.trainer.set_training_context({
+                "policy_source": "trained",
+                "torch_available": True,
+                "checkpoint_path": checkpoint_path,
+                "checkpoint_mode": self.checkpoint_mode,
+                "config_hash": self.config_hash,
+            })
             load_result = {"loaded": False, "compatible": False, "skip_reason": "load_disabled", "error": ""}
             if (not self.cfg.get("force_retrain", False)) and self.cfg.get("load_checkpoint_if_exists", True):
                 load_start = time.time()

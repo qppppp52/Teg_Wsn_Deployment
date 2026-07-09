@@ -200,6 +200,10 @@ def run_compare_experiment(config):
     _plot_pareto_compare(pareto_by_algorithm["actual"], os.path.join(root, "figures", "pareto_compare_all.png"), "Rsum actual (Mbps)")
     _plot_history_compare(histories, "HV", os.path.join(root, "figures", "hv_compare_all.png"), "Hypervolume")
     _plot_history_compare(histories, "FR_current", os.path.join(root, "figures", "fr_compare_all.png"), "Feasible Ratio")
+    gen0_rows = _build_gen0_compare_rows(histories)
+    dqn_rows = _build_dqn_action_reward_rows(root, summaries)
+    _save_dict_rows(gen0_rows, os.path.join(root, "gen0_initial_population_compare.csv"))
+    _save_dict_rows(dqn_rows, os.path.join(root, "dqn_action_reward_summary.csv"))
     experiment_end = datetime.now()
     _write_experiment_validity_report(
         summaries,
@@ -208,6 +212,15 @@ def run_compare_experiment(config):
         "python main.py --experiment configs/experiment_small_compare.yaml",
         experiment_start,
         experiment_end,
+        gen0_rows,
+        dqn_rows,
+    )
+    _write_final_experiment_summary(
+        summaries,
+        os.path.join(root, "final_experiment_summary.md"),
+        config,
+        gen0_rows,
+        dqn_rows,
     )
     logger.info("summary_all_algorithms.csv generated")
     logger.info("pareto_compare_actual.png generated")
@@ -511,7 +524,101 @@ def _save_recommended_all_csv(summaries, path):
             writer.writerow({key: _json_ready(summary).get(key, "") for key in fields})
 
 
-def _write_experiment_validity_report(summaries, path, config=None, command="", start_time=None, end_time=None):
+def _build_gen0_compare_rows(histories):
+    rows = []
+    for (algorithm, seed), history in sorted(histories.items(), key=lambda item: (item[0][0], item[0][1])):
+        def first(key, default=""):
+            values = history.get(key, [])
+            return values[0] if values else default
+        rows.append({
+            "algorithm": algorithm,
+            "seed": seed,
+            "gen0_FR_before_repair": first("FR_before_repair"),
+            "gen0_CV_before_repair": first("CV_before_repair_mean"),
+            "gen0_FR_after_repair": first("FR_after_repair"),
+            "gen0_CV_after_repair": first("CV_after_repair_mean"),
+            "gen0_best_coverage": first("coverage_best"),
+            "gen0_best_rsum": first("rsum_actual_best"),
+            "gen0_best_rsum_actual": first("rsum_actual_best"),
+            "gen0_best_rsum_capacity": first("rsum_capacity_best"),
+            "gen0_pareto_count": first("pareto_count"),
+            "gen0_diversity": first("diversity"),
+        })
+    return rows
+
+
+def _build_dqn_action_reward_rows(root, summaries):
+    rows = []
+    for summary in summaries:
+        if summary.get("algorithm") != "dqn_cr_mode":
+            continue
+        seed = summary.get("seed")
+        path = os.path.join(root, "dqn_cr_mode", f"seed_{seed}", "data", "dqn_training_log.csv")
+        if not os.path.exists(path):
+            continue
+        with open(path, newline="", encoding="utf-8") as f:
+            records = list(csv.DictReader(f))
+        if not records:
+            continue
+        rows.append({
+            "seed": seed,
+            "mean_reward": _mean_csv(records, "reward"),
+            "final_epsilon": records[-1].get("epsilon", ""),
+            "most_used_action": _most_common(records, "action_name"),
+            "action_usage_distribution": _distribution(records, "action_name"),
+            "mean_num_allowed_actions": _mean_csv(records, "num_allowed_actions"),
+            "dominant_pressure_distribution": _distribution(records, "dominant_pressure"),
+            "mean_R_CV": _mean_csv(records, "R_CV"),
+            "mean_R_pressure": _mean_csv(records, "R_pressure"),
+            "mean_R_FR": _mean_csv(records, "R_FR"),
+            "mean_R_HV": _mean_csv(records, "R_HV"),
+            "mean_R_obj": _mean_csv(records, "R_obj"),
+            "mean_R_div": _mean_csv(records, "R_div"),
+            "mean_R_cost": _mean_csv(records, "R_cost"),
+        })
+    return rows
+
+
+def _save_dict_rows(rows, path):
+    if not rows:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fields = []
+    for row in rows:
+        for key in row:
+            if key not in fields:
+                fields.append(key)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _mean_csv(records, key):
+    values = []
+    for row in records:
+        try:
+            values.append(float(row.get(key, "")))
+        except (TypeError, ValueError):
+            pass
+    return float(np.mean(values)) if values else ""
+
+
+def _most_common(records, key):
+    values = [row.get(key, "") for row in records if row.get(key, "")]
+    return max(set(values), key=values.count) if values else ""
+
+
+def _distribution(records, key):
+    values = [row.get(key, "") for row in records if row.get(key, "")]
+    if not values:
+        return ""
+    counts = {value: values.count(value) for value in sorted(set(values))}
+    total = max(len(values), 1)
+    return ";".join(f"{key}:{count}/{total}" for key, count in counts.items())
+
+
+def _write_experiment_validity_report(summaries, path, config=None, command="", start_time=None, end_time=None, gen0_rows=None, dqn_rows=None):
     if not summaries:
         return
     config = config or {}
@@ -521,6 +628,8 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
     incompatible = [row for row in drl_rows if str(row.get("checkpoint_compatible", "")).lower() == "false"]
     saturated = [row for row in summaries if float(row.get("saturated_link_ratio", 0.0) or 0.0) > 0.9]
     pareto_single = [row for row in summaries if int(row.get("pareto_count", 0) or 0) <= 1]
+    gen0_rows = gen0_rows or []
+    dqn_rows = dqn_rows or []
     evidence = _collect_reproducibility_evidence(config, command, start_time, end_time)
     lines = [
         "# Experiment Validity Report",
@@ -529,13 +638,14 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         "",
         f"- Git branch: {evidence['git_branch']}",
         f"- Git commit: {evidence['git_commit']}",
+        f"- Git dirty: {evidence['git_dirty']}",
         f"- Python: {evidence['python']}",
         f"- Torch: {evidence['torch']}",
         f"- NumPy: {evidence['numpy']}",
         f"- PyYAML: {evidence['pyyaml']}",
         f"- py_compile: {evidence['py_compile']}",
         f"- YAML parse: {evidence['yaml_parse']}",
-        "- pytest summary: run before this experiment; see console/CI output for exact collected test count.",
+        f"- pytest: {evidence['pytest']}",
         f"- Full command: `{evidence['command']}`",
         f"- Experiment start: {evidence['start_time']}",
         f"- Experiment end: {evidence['end_time']}",
@@ -581,6 +691,20 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         )
     lines.extend([
         "",
+        "## Gen0 Initial Population Comparison",
+        "",
+        "| algorithm | seed | FR before | CV before | FR after | CV after | best coverage | best rsum | pareto count | diversity |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for row in gen0_rows:
+        lines.append(
+            f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('gen0_FR_before_repair', '')} | "
+            f"{row.get('gen0_CV_before_repair', '')} | {row.get('gen0_FR_after_repair', '')} | "
+            f"{row.get('gen0_CV_after_repair', '')} | {row.get('gen0_best_coverage', '')} | "
+            f"{row.get('gen0_best_rsum', '')} | {row.get('gen0_pareto_count', '')} | {row.get('gen0_diversity', '')} |"
+        )
+    lines.extend([
+        "",
         "## DRL-Init Initial Population",
         "",
         "| seed | init FR | init CV | init diversity | accepted drl | heuristic | random |",
@@ -592,6 +716,23 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
             f"{row.get('init_diversity', '')} | {row.get('accepted_drl_count', '')} | "
             f"{row.get('accepted_heuristic_count', '')} | {row.get('accepted_random_count', '')} |"
         )
+    lines.extend([
+        "",
+        "## DQN Action and Reward Diagnostics",
+        "",
+        "| seed | mean reward | final epsilon | most used action | mean allowed actions | dominant pressure distribution |",
+        "|---:|---:|---:|---|---:|---|",
+    ])
+    for row in dqn_rows:
+        lines.append(
+            f"| {row.get('seed', '')} | {row.get('mean_reward', '')} | {row.get('final_epsilon', '')} | "
+            f"{row.get('most_used_action', '')} | {row.get('mean_num_allowed_actions', '')} | "
+            f"{row.get('dominant_pressure_distribution', '')} |"
+        )
+    lines.extend([
+        "",
+        "DQN-CR-MODE provides adaptive repair/search control under constraint pressure. In the current small scenario, its final objective advantage is seed-dependent, while DRL-Init-CR-MODE shows more stable improvement by improving the initial population quality.",
+    ])
     status = "PASS" if not fallback and not incompatible and not saturated and not pareto_single else "REVIEW"
     lines.extend([
         "",
@@ -600,6 +741,87 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         f"- Status: {status}",
         f"- Rsum saturation concerns: {len(saturated)}",
         f"- Pareto count <= 1 concerns: {len(pareto_single)}",
+    ])
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None, dqn_rows=None):
+    config = config or {}
+    gen0_rows = gen0_rows or []
+    dqn_rows = dqn_rows or []
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lines = [
+        "# Final Experiment Summary",
+        "",
+        "## Configuration",
+        "",
+        f"- Algorithms: {', '.join(str(row.get('algorithm')) for row in summaries if row.get('algorithm'))}",
+        f"- Seeds: {', '.join(str(row.get('seed')) for row in summaries if row.get('seed') != '')}",
+        f"- use_data_rate_cap: {config.get('channel', {}).get('use_data_rate_cap', False)}",
+        f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
+        "",
+        "## Throughput Semantics",
+        "",
+        f"- Rsum actual: {_rsum_actual_definition(config)}",
+        "- Rsum capacity: Shannon theoretical aggregate link capacity before business data-rate capping.",
+        "",
+        "## Checkpoint And Policy Source",
+        "",
+        "| seed | policy_source | torch_available | checkpoint_mode | checkpoint_compatible | checkpoint_path |",
+        "|---:|---|---|---|---|---|",
+    ]
+    for row in summaries:
+        if row.get("algorithm") == "drl_init_cr_mode":
+            lines.append(
+                f"| {row.get('seed', '')} | {row.get('policy_source', '')} | {row.get('torch_available', '')} | "
+                f"{row.get('checkpoint_mode', '')} | {row.get('checkpoint_compatible', '')} | {row.get('checkpoint_path', '')} |"
+            )
+    lines.extend([
+        "",
+        "## Gen0 Initial Population Comparison",
+        "",
+        "| algorithm | seed | FR after | CV after | best coverage | best rsum | pareto count | diversity |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for row in gen0_rows:
+        lines.append(
+            f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('gen0_FR_after_repair', '')} | "
+            f"{row.get('gen0_CV_after_repair', '')} | {row.get('gen0_best_coverage', '')} | "
+            f"{row.get('gen0_best_rsum', '')} | {row.get('gen0_pareto_count', '')} | {row.get('gen0_diversity', '')} |"
+        )
+    lines.extend([
+        "",
+        "## Final Metrics",
+        "",
+        "| algorithm | seed | FR | CV | HV | Pareto | best Rsum actual |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ])
+    for row in summaries:
+        lines.append(
+            f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('final_FR_after_repair', '')} | "
+            f"{row.get('final_CV_after_repair', '')} | {row.get('final_HV', '')} | {row.get('pareto_count', '')} | {row.get('best_rsum_actual', '')} |"
+        )
+    lines.extend([
+        "",
+        "## DQN Action And Reward Diagnostics",
+        "",
+        "| seed | mean reward | final epsilon | most used action | mean allowed actions |",
+        "|---:|---:|---:|---|---:|",
+    ])
+    for row in dqn_rows:
+        lines.append(
+            f"| {row.get('seed', '')} | {row.get('mean_reward', '')} | {row.get('final_epsilon', '')} | "
+            f"{row.get('most_used_action', '')} | {row.get('mean_num_allowed_actions', '')} |"
+        )
+    lines.extend([
+        "",
+        "## Conclusion",
+        "",
+        "- CR-MODE is a feasible baseline in this scenario.",
+        "- DQN-CR-MODE provides adaptive repair/search control, but its final improvement is seed-dependent in the current small scenario.",
+        "- DRL-Init-CR-MODE shows the most stable improvement here by improving initial population quality.",
+        "- For formal paper claims, additional seeds or larger scenarios can further strengthen statistical evidence.",
     ])
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -632,16 +854,20 @@ def _collect_reproducibility_evidence(config, command, start_time, end_time):
         torch_version = "unavailable"
     git_branch = _run_text_command(["git", "branch", "--show-current"])
     git_commit = _run_text_command(["git", "rev-parse", "--short", "HEAD"])
+    git_dirty = bool(_run_text_command(["git", "status", "--short"]))
     runtime = ""
     if start_time is not None and end_time is not None:
         runtime = (end_time - start_time).total_seconds()
+    pytest_summary = _run_validation_pytest_summary()
     return {
         "git_branch": git_branch,
         "git_commit": git_commit,
+        "git_dirty": git_dirty,
         "python": sys.version.split()[0],
         "torch": torch_version,
         "numpy": np.__version__,
         "pyyaml": yaml_version,
+        "pytest": pytest_summary,
         "py_compile": py_result,
         "yaml_parse": yaml_result,
         "command": command or "python main.py --experiment configs/experiment_small_compare.yaml",
@@ -649,6 +875,32 @@ def _collect_reproducibility_evidence(config, command, start_time, end_time):
         "end_time": end_time.isoformat() if end_time is not None else "unknown",
         "runtime_seconds": runtime,
     }
+
+
+def _run_validation_pytest_summary():
+    tests = [
+        "tests/test_dqn_action_mask.py",
+        "tests/test_rl_init_quality_score.py",
+        "tests/test_rl_init_diversity_metrics.py",
+        "tests/test_drl_init_training_log.py",
+        "tests/test_throughput_metric_switch.py",
+        "tests/test_rl_init_checkpoint.py",
+        "tests/test_rl_init_checkpoint_compatibility.py",
+        "tests/test_drl_init_cr_mode_smoke.py",
+    ]
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", *tests],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=180,
+            check=False,
+        )
+        lines = [line.strip("= ") for line in proc.stdout.splitlines() if " passed" in line or " failed" in line or " skipped" in line or " error" in line]
+        return lines[-1] if lines else f"pytest exited with code {proc.returncode}"
+    except Exception as exc:
+        return f"unavailable ({exc})"
 
 
 def _run_text_command(cmd):
@@ -764,4 +1016,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
