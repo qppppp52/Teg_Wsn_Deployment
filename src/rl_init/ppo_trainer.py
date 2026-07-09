@@ -97,6 +97,9 @@ def _episode_log_row(ep, episode_steps, total_steps, total_reward, step_reward_s
         "rsum": info.get("rsum", np.nan),
         "rsum_actual": info.get("rsum_actual", np.nan),
         "rsum_capacity": info.get("rsum_capacity", np.nan),
+        "rsum_norm": info.get("rsum_norm", np.nan),
+        "rsum_ref_min": info.get("rsum_ref_min", np.nan),
+        "rsum_ref_max": info.get("rsum_ref_max", np.nan),
         "repair_iter": info.get("repair_iter", np.nan),
         "repair_success": info.get("repair_success", bool(info.get("feasible", False))),
         "num_sensors": info.get("num_sensors", np.nan),
@@ -109,4 +112,3 @@ def _episode_log_row(ep, episode_steps, total_steps, total_reward, step_reward_s
         "approx_kl": stats.get("approx_kl", np.nan),
         "loaded_checkpoint": False,
     }
-

@@ -26,7 +26,8 @@ logger = get_logger("DRLInitPopulationGenerator")
 TRAINING_LOG_COLUMNS = [
     "episode", "step", "episode_steps", "episode_reward", "total_reward", "step_reward_sum",
     "terminal_reward", "feasible", "cv", "cv_deploy", "cv_link", "cv_capacity", "cv_energy",
-    "cv_sink", "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "repair_iter",
+    "cv_sink", "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "rsum_norm",
+    "rsum_ref_min", "rsum_ref_max", "repair_iter",
     "repair_success", "num_sensors", "num_aps", "invalid_action_count", "loss", "policy_loss",
     "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "fallback_reason", "policy_source", "torch_available",
     "checkpoint_path", "checkpoint_compatible", "checkpoint_skip_reason", "checkpoint_error", "checkpoint_mode", "config_hash",
@@ -291,8 +292,9 @@ class DRLInitPopulationGenerator:
             "init_best_rsum": max([float(row.get("rsum", 0.0)) for row in self.init_metrics], default=0.0),
             "init_best_rsum_actual": max([float(row.get("rsum_actual", 0.0)) for row in self.init_metrics], default=0.0),
             "init_best_rsum_capacity": max([float(row.get("rsum_capacity", 0.0)) for row in self.init_metrics], default=0.0),
+            "rsum_ref_min": self.cfg.get("normalization", {}).get("rsum_ref_min", 0.0),
+            "rsum_ref_max": self.cfg.get("normalization", {}).get("rsum_ref_max", 1.0),
         }
         self.summary = summary
         with open(os.path.join(data_dir, "drl_init_summary.json"), "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
-

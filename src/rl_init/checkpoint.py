@@ -82,6 +82,7 @@ def stable_config_hash(config: dict) -> str:
         "max_selected_sensors": cfg.get("max_selected_sensors"),
         "max_selected_aps": cfg.get("max_selected_aps"),
         "reward": cfg.get("reward", {}),
+        "normalization": cfg.get("normalization", {}),
         "network": {
             "candidate_feature_dim": net.get("candidate_feature_dim", "auto"),
             "global_feature_dim": net.get("global_feature_dim", "auto"),
@@ -116,6 +117,7 @@ def build_checkpoint_meta(agent, ctx, config: dict, checkpoint_mode: str | None 
         "max_selected_sensors": int(cfg.get("max_selected_sensors", config.get("deployment", {}).get("max_sensors", 0))),
         "max_selected_aps": int(cfg.get("max_selected_aps", config.get("deployment", {}).get("max_aps", 0))),
         "config_hash": stable_config_hash(config),
+        "normalization": cfg.get("normalization", {}),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "git_branch": _git_branch(),
     }

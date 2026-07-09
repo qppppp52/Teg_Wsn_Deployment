@@ -61,7 +61,7 @@ drl_init:
 
   normalization:
     rsum_ref_min: 0.0
-    rsum_ref_max: 2.0e7
+    rsum_ref_max: 1.6e8
     cv_ref: 10.0
     repair_iter_ref: 5
 
@@ -89,6 +89,3 @@ drl_init:
   checkpoint_name_template_shared: "drl_init_{scene_name}_{throughput_metric}_shared.pt"
   save_training_log: true
   save_generated_population: true
-
-
-

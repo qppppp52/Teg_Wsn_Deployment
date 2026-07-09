@@ -21,3 +21,7 @@ config_files:
   constraints: configs/constraints_small.yaml
   dqn: configs/dqn.yaml
   drl_init: configs/drl_init.yaml
+
+report:
+  run_pytest_validation: true
+  pytest_timeout_seconds: 180

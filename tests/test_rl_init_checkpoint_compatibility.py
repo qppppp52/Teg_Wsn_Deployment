@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from src.rl_init.checkpoint import check_checkpoint_compatibility, save_checkpoint, load_checkpoint
+from src.rl_init.checkpoint import check_checkpoint_compatibility, save_checkpoint, load_checkpoint, stable_config_hash
 from tests.test_rl_init_checkpoint import TinyAgent
 
 
@@ -53,3 +53,20 @@ def test_incompatible_checkpoint_is_not_loaded():
     assert result["loaded"] is False
     assert result["compatible"] is False
     assert result["skip_reason"] == "throughput_metric_mismatch"
+
+def test_config_hash_changes_when_reward_normalization_changes():
+    base = {
+        "experiment": {"name": "small_center_heat_compare"},
+        "objectives": {"throughput_metric": "actual"},
+        "drl_init": {
+            "role_actions": ["sensor", "ap", "skip", "stop"],
+            "max_selected_sensors": 10,
+            "max_selected_aps": 2,
+            "reward": {"rsum": 0.25},
+            "normalization": {"rsum_ref_min": 0.0, "rsum_ref_max": 2.0e7},
+            "network": {"hidden_dim": 128},
+        },
+    }
+    changed = copy.deepcopy(base)
+    changed["drl_init"]["normalization"]["rsum_ref_max"] = 1.6e8
+    assert stable_config_hash(base) != stable_config_hash(changed)

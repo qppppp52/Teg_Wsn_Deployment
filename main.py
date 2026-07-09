@@ -42,6 +42,7 @@ BASE_SUMMARY_FIELDS = [
     "saturated_link_ratio", "runtime_seconds",
     "final_FR", "final_CV_mean", "best_rsum", "recommended_rsum",
     "throughput_capacity_best", "throughput_actual_best",
+    "rsum_ref_min", "rsum_ref_max",
 ]
 
 
@@ -415,6 +416,8 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         "throughput_metric": config.get("objectives", {}).get("throughput_metric", "actual"),
         "rsum_actual_definition": _rsum_actual_definition(config),
         "rsum_capacity_definition": "Shannon theoretical aggregate link capacity before business data-rate capping.",
+        "rsum_ref_min": _drl_norm_value(config, "rsum_ref_min", 0.0),
+        "rsum_ref_max": _drl_norm_value(config, "rsum_ref_max", 1.0),
     }
     if algorithm == "dqn_cr_mode":
         training_log = getattr(algo, "training_log", [])
@@ -655,6 +658,8 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         "",
         f"- use_data_rate_cap: {config.get('channel', {}).get('use_data_rate_cap', False)}",
         f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
+        f"- rsum_ref_min: {_drl_norm_value(config, 'rsum_ref_min', 0.0)}",
+        f"- rsum_ref_max: {_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
         f"- Rsum actual definition: {_rsum_actual_definition(config)}",
         "- Rsum capacity definition: Shannon theoretical aggregate link capacity before business data-rate capping.",
         "- If the paper emphasizes business-rate-capped actual throughput, set `channel.use_data_rate_cap=true`; if it emphasizes theoretical link capability, use `objectives.throughput_metric=capacity` and label figures as capacity.",
@@ -742,7 +747,7 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         f"- Rsum saturation concerns: {len(saturated)}",
         f"- Pareto count <= 1 concerns: {len(pareto_single)}",
     ])
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
 
 
@@ -760,11 +765,14 @@ def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None
         f"- Seeds: {', '.join(str(row.get('seed')) for row in summaries if row.get('seed') != '')}",
         f"- use_data_rate_cap: {config.get('channel', {}).get('use_data_rate_cap', False)}",
         f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
+        f"- rsum_ref_min: {_drl_norm_value(config, 'rsum_ref_min', 0.0)}",
+        f"- rsum_ref_max: {_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
         "",
         "## Throughput Semantics",
         "",
         f"- Rsum actual: {_rsum_actual_definition(config)}",
         "- Rsum capacity: Shannon theoretical aggregate link capacity before business data-rate capping.",
+        f"- PPO Rsum reward normalization: min={_drl_norm_value(config, 'rsum_ref_min', 0.0)}, max={_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
         "",
         "## Checkpoint And Policy Source",
         "",
@@ -823,13 +831,13 @@ def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None
         "- DRL-Init-CR-MODE shows the most stable improvement here by improving initial population quality.",
         "- For formal paper claims, additional seeds or larger scenarios can further strengthen statistical evidence.",
     ])
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
 
 
 def _collect_reproducibility_evidence(config, command, start_time, end_time):
     import py_compile
-    py_files = ["main.py", "src/rl_init/population_generator.py", "src/rl_init/checkpoint.py", "src/rl_init/ppo_trainer.py", "src/rl_init/init_evaluator.py"]
+    py_files = ["main.py", "src/rl_init/reward.py", "src/rl_init/population_generator.py", "src/rl_init/checkpoint.py", "src/rl_init/ppo_trainer.py", "src/rl_init/init_evaluator.py"]
     yaml_files = ["configs/experiment_small_compare.yaml", "configs/drl_init.yaml", "configs/channel_small.yaml"]
     try:
         for file_path in py_files:
@@ -858,7 +866,7 @@ def _collect_reproducibility_evidence(config, command, start_time, end_time):
     runtime = ""
     if start_time is not None and end_time is not None:
         runtime = (end_time - start_time).total_seconds()
-    pytest_summary = _run_validation_pytest_summary()
+    pytest_summary = _run_validation_pytest_summary(config)
     return {
         "git_branch": git_branch,
         "git_commit": git_commit,
@@ -877,7 +885,11 @@ def _collect_reproducibility_evidence(config, command, start_time, end_time):
     }
 
 
-def _run_validation_pytest_summary():
+def _run_validation_pytest_summary(config=None):
+    report_cfg = (config or {}).get("report", {})
+    if not bool(report_cfg.get("run_pytest_validation", True)):
+        return "skipped by config"
+    timeout_seconds = int(report_cfg.get("pytest_timeout_seconds", 180))
     tests = [
         "tests/test_dqn_action_mask.py",
         "tests/test_rl_init_quality_score.py",
@@ -894,7 +906,7 @@ def _run_validation_pytest_summary():
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=180,
+            timeout=timeout_seconds,
             check=False,
         )
         lines = [line.strip("= ") for line in proc.stdout.splitlines() if " passed" in line or " failed" in line or " skipped" in line or " error" in line]
@@ -908,6 +920,10 @@ def _run_text_command(cmd):
         return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip() or "unknown"
     except Exception:
         return "unknown"
+
+
+def _drl_norm_value(config, key, default):
+    return config.get("drl_init", {}).get("normalization", {}).get(key, default)
 
 
 def _rsum_actual_definition(config):

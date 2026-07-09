@@ -42,7 +42,7 @@ def test_drl_reward_and_quality_score_use_selected_metric(monkeypatch):
     class FakeEnv:
         config = {
             "objectives": {"throughput_metric": "capacity"},
-            "drl_init": {"normalization": {"rsum_ref_max": 100.0, "cv_ref": 10.0, "repair_iter_ref": 5}},
+            "drl_init": {"normalization": {"rsum_ref_min": 0.0, "rsum_ref_max": 100.0, "cv_ref": 10.0, "repair_iter_ref": 5}},
         }
         cfg = {"max_repair_iter": 1}
         ctx = SimpleNamespace(config={"constraints": {"max_repair_iter": 1}})
@@ -66,5 +66,6 @@ def test_drl_reward_and_quality_score_use_selected_metric(monkeypatch):
     monkeypatch.setattr(reward_module, "evaluate_individual", lambda *args, **kwargs: (sol, None))
     reward, metrics = compute_terminal_reward(FakeEnv(), {"rsum": 1.0, "coverage": 0.0, "feasible_bonus": 0.0}, FakeEnv.config["drl_init"]["normalization"])
     assert metrics["rsum"] == 90.0
+    assert metrics["rsum_norm"] == 0.9
     assert reward > 0.8
     assert quality_score(sol, FakeEnv.config) > quality_score(SimpleNamespace(coverage=0.5, throughput=10.0, cv=0.0, feasible=True, repair_iter=0, metadata={"throughput_actual": 10.0, "throughput_capacity": 20.0}), FakeEnv.config)

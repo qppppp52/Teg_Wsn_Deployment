@@ -1,4 +1,6 @@
-from src.rl_init.reward import compute_step_reward
+import math
+
+from src.rl_init.reward import compute_step_reward, normalize_rsum
 
 
 def test_rl_init_step_reward_rewards_estimated_improvement():
@@ -13,3 +15,15 @@ def test_rl_init_step_reward_penalizes_invalid_action():
     after = {"estimated_coverage": 0.1}
     reward = compute_step_reward(before, after, {"invalid_action": True}, {"invalid_action_penalty": 0.2})
     assert reward < 0
+
+def test_normalize_rsum_uses_min_max_interval():
+    cfg = {"rsum_ref_min": 0.0, "rsum_ref_max": 1.6e8}
+    assert normalize_rsum(0.0, cfg) == 0.0
+    assert math.isclose(normalize_rsum(8.0e7, cfg), 0.5)
+    assert normalize_rsum(1.6e8, cfg) == 1.0
+    assert normalize_rsum(2.0e8, cfg) == 1.0
+
+
+def test_normalize_rsum_does_not_saturate_at_twenty_mbps():
+    cfg = {"rsum_ref_min": 0.0, "rsum_ref_max": 1.6e8}
+    assert math.isclose(normalize_rsum(2.0e7, cfg), 0.125)

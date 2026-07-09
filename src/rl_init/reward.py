@@ -24,6 +24,14 @@ def compute_step_reward(prev_summary: dict, new_summary: dict, info: dict, rewar
     return float(reward)
 
 
+def normalize_rsum(rsum: float, norm_cfg: dict) -> float:
+    rsum_min = float(norm_cfg.get("rsum_ref_min", 0.0))
+    rsum_max = float(norm_cfg.get("rsum_ref_max", 1.0))
+    denom = max(rsum_max - rsum_min, 1.0e-12)
+    value = (float(rsum) - rsum_min) / denom
+    return float(np.clip(value, 0.0, 1.0))
+
+
 def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[float, dict]:
     individual = env.build_current_individual()
     solution, _ = evaluate_individual(
@@ -36,7 +44,6 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
     rsum_capacity = float(solution.metadata.get("throughput_capacity", getattr(solution, "throughput", 0.0)))
     metric = env.config.get("objectives", {}).get("throughput_metric", "actual")
     rsum = rsum_capacity if metric == "capacity" else rsum_actual
-    rsum_ref = max(float(norm_cfg.get("rsum_ref_max", 2.0e7)), 1.0e-12)
     cv = float(getattr(solution, "cv", 0.0))
     cv_ref = max(float(norm_cfg.get("cv_ref", 10.0)), 1.0e-12)
     repair_iter = float(getattr(solution, "repair_iter", 0.0))
@@ -48,7 +55,8 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
 
     reward = 0.0
     reward += float(reward_cfg.get("coverage", 0.25)) * coverage
-    reward += float(reward_cfg.get("rsum", 0.25)) * min(rsum / rsum_ref, 1.0)
+    rsum_norm = normalize_rsum(rsum, norm_cfg)
+    reward += float(reward_cfg.get("rsum", 0.25)) * rsum_norm
     reward += float(reward_cfg.get("feasible_bonus", 0.30)) * (1.0 if feasible else 0.0)
     reward -= float(reward_cfg.get("cv_penalty", 0.35)) * min(cv / cv_ref, 1.0)
     reward -= float(reward_cfg.get("repair_cost_penalty", 0.10)) * min(repair_iter / repair_ref, 1.0)
@@ -62,6 +70,9 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
         "rsum_actual": rsum_actual,
         "rsum_capacity": rsum_capacity,
         "throughput_metric": metric,
+        "rsum_norm": rsum_norm,
+        "rsum_ref_min": float(norm_cfg.get("rsum_ref_min", 0.0)),
+        "rsum_ref_max": float(norm_cfg.get("rsum_ref_max", 1.0)),
         "cv": cv,
         "feasible": feasible,
         "repair_iter": repair_iter,
