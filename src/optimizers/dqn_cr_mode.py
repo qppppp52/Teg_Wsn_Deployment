@@ -1,4 +1,4 @@
-﻿"""DQN-controlled CR-MODE optimizer."""
+"""DQN-controlled CR-MODE optimizer."""
 from __future__ import annotations
 
 import csv

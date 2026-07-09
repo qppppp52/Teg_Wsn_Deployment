@@ -1,4 +1,4 @@
-﻿channel:
+channel:
   bandwidth: 1000000.0
   carrier_frequency: 2400000000.0
   fading:

@@ -1,4 +1,4 @@
-﻿"""Reward functions for PPO deployment initialization."""
+"""Reward functions for PPO deployment initialization."""
 from __future__ import annotations
 
 import numpy as np

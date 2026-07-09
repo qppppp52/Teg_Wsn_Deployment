@@ -1,4 +1,4 @@
-﻿"""Action mask construction for the DRL initialization environment."""
+"""Action mask construction for the DRL initialization environment."""
 from __future__ import annotations
 
 import numpy as np

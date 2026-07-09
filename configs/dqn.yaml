@@ -1,4 +1,4 @@
-﻿dqn:
+dqn:
   enabled: true
   state_dim: auto
   action_dim: auto

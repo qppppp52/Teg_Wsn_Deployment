@@ -1,4 +1,4 @@
-﻿"""CSV logging helpers for DRL initialization."""
+"""CSV logging helpers for DRL initialization."""
 from __future__ import annotations
 
 import csv

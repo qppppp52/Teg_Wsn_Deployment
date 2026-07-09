@@ -1,4 +1,4 @@
-﻿"""Sequential RL initializer for DRL-Init-CR-MODE.
+"""Sequential RL initializer for DRL-Init-CR-MODE.
 
 This module trains a policy-gradient placement policy. The policy builds an
 individual step by step, evaluates it with the real decoder/repair/objective

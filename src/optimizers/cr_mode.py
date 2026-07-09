@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from src.optimizers.base_optimizer import BaseOptimizer
 from src.model.population import Population
 from src.model.pareto_archive import ParetoArchive

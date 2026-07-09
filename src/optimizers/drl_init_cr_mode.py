@@ -1,4 +1,4 @@
-﻿"""DRL-initialized CR-MODE optimizer."""
+"""DRL-initialized CR-MODE optimizer."""
 from __future__ import annotations
 
 from src.optimizers.cr_mode import CRMode
@@ -21,6 +21,13 @@ class DRLInitCRMode(CRMode):
         self.checkpoint_path = ""
         self.torch_available = False
         self.drl_init_summary = {}
+        self.checkpoint_compatible = False
+        self.checkpoint_skip_reason = ""
+        self.checkpoint_error = ""
+        self.checkpoint_mode = ""
+        self.config_hash = ""
+        self.checkpoint_load_seconds = 0.0
+        self.pretrain_seconds = 0.0
 
     def initialize_population(self):
         generator = DRLInitPopulationGenerator(self.ctx, self.config)
@@ -35,6 +42,13 @@ class DRLInitCRMode(CRMode):
         self.policy_source = getattr(generator, "policy_source", "trained")
         self.checkpoint_path = getattr(generator, "policy_path", "")
         self.torch_available = bool(getattr(generator, "torch_available", False))
+        self.checkpoint_compatible = bool(getattr(generator, "checkpoint_compatible", False))
+        self.checkpoint_skip_reason = getattr(generator, "checkpoint_skip_reason", "")
+        self.checkpoint_error = getattr(generator, "checkpoint_error", "")
+        self.checkpoint_mode = getattr(generator, "checkpoint_mode", "")
+        self.config_hash = getattr(generator, "config_hash", "")
+        self.checkpoint_load_seconds = float(getattr(generator, "checkpoint_load_seconds", 0.0))
+        self.pretrain_seconds = float(getattr(generator, "pretrain_seconds", 0.0))
         generator.save_artifacts(self.config.get("runtime", {}).get("output_dir", "results"))
         self.drl_init_summary = getattr(generator, "summary", {})
         return population

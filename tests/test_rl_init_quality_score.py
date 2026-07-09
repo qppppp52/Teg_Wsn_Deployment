@@ -1,4 +1,4 @@
-﻿import math
+import math
 from types import SimpleNamespace
 
 from src.rl_init.init_evaluator import quality_score, get_selected_rsum

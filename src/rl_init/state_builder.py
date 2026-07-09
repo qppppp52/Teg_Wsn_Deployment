@@ -1,4 +1,4 @@
-﻿"""State builder for the DRL initialization environment."""
+"""State builder for the DRL initialization environment."""
 from __future__ import annotations
 
 import numpy as np

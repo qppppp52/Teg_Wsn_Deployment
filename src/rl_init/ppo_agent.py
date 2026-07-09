@@ -1,4 +1,4 @@
-﻿"""PPO agent for DRL initialization."""
+"""PPO agent for DRL initialization."""
 from __future__ import annotations
 
 import numpy as np

@@ -1,4 +1,4 @@
-﻿"""Composite heuristic initializer for DRL-Init fallback and mixing."""
+"""Composite heuristic initializer for DRL-Init fallback and mixing."""
 from __future__ import annotations
 
 import numpy as np

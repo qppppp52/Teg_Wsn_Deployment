@@ -1,4 +1,4 @@
-﻿"""Rate and SNR utilities."""
+"""Rate and SNR utilities."""
 from __future__ import annotations
 
 import numpy as np

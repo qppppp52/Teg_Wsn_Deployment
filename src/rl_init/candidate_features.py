@@ -1,4 +1,4 @@
-﻿"""Candidate feature construction for PPO initialization."""
+"""Candidate feature construction for PPO initialization."""
 from __future__ import annotations
 
 import numpy as np

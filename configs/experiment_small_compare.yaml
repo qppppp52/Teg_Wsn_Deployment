@@ -1,4 +1,4 @@
-﻿experiment:
+experiment:
   name: small_center_heat_compare
   algorithms:
     - cr_mode

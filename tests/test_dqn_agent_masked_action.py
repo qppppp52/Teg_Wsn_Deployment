@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import pytest
 
 from src.dqn.action_space import ACTIONS

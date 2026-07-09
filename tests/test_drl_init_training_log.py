@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import uuid
 from pathlib import Path
 
@@ -12,6 +12,7 @@ REQUIRED_COLUMNS = {
     "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "repair_iter",
     "repair_success", "num_sensors", "num_aps", "invalid_action_count", "policy_loss",
     "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "policy_source", "torch_available",
+    "checkpoint_compatible", "checkpoint_skip_reason", "checkpoint_error", "checkpoint_mode", "config_hash",
 }
 
 

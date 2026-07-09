@@ -1,4 +1,4 @@
-﻿mode:
+mode:
   population_size: 30
   max_generations: 60
   archive_max_size: 100

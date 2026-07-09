@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 
 from src.dqn.action_mask import build_dqn_action_mask
 from src.dqn.action_space import ACTIONS

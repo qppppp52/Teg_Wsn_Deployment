@@ -1,4 +1,4 @@
-﻿"""DQN agent with epsilon-greedy action selection and checkpoints."""
+"""DQN agent with epsilon-greedy action selection and checkpoints."""
 from __future__ import annotations
 
 import os

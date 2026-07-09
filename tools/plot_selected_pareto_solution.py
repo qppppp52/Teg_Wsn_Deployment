@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 """
 Pareto 解部署状态可视化 — 内表面温度热力图 + 传感器/AP/散热片叠加
 

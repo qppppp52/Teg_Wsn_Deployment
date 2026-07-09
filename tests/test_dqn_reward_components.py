@@ -1,4 +1,4 @@
-﻿from src.dqn.reward_function import compute_reward
+from src.dqn.reward_function import compute_reward
 
 
 def test_dqn_reward_components_positive_for_cv_fr_hv_improvement():

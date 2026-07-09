@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from src.rl_init.individual_builder import build_individual_from_orders
 from tests.rl_init_test_utils import make_dummy_ctx
 

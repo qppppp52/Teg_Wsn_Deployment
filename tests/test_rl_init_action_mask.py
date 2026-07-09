@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from src.rl_init.env import InitDeploymentEnv
 from src.rl_init.action_space import ROLE_AP, ROLE_SENSOR, ROLE_STOP
 from tests.rl_init_test_utils import make_dummy_ctx

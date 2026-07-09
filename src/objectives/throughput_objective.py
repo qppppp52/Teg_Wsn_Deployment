@@ -1,4 +1,4 @@
-﻿"""Throughput objective with theoretical/actual throughput bookkeeping."""
+"""Throughput objective with theoretical/actual throughput bookkeeping."""
 from __future__ import annotations
 
 import numpy as np

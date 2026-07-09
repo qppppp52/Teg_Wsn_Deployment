@@ -1,4 +1,4 @@
-﻿"""Generation-level diagnostics for repair pressure and objective trade-offs."""
+"""Generation-level diagnostics for repair pressure and objective trade-offs."""
 from __future__ import annotations
 
 import numpy as np

@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 
 from src.physics.teg_model import compute_delta_T_thermal_resistance
 

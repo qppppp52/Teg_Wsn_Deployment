@@ -1,4 +1,4 @@
-﻿"""PPO actor-critic policy for candidate-role initialization."""
+"""PPO actor-critic policy for candidate-role initialization."""
 from __future__ import annotations
 
 try:

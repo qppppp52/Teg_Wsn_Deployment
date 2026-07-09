@@ -1,4 +1,4 @@
-﻿"""Rollout buffer with GAE for PPO initialization."""
+"""Rollout buffer with GAE for PPO initialization."""
 from __future__ import annotations
 
 import numpy as np

@@ -1,4 +1,4 @@
-﻿"""Population generator for PPO-initialized CR-MODE."""
+"""Population generator for PPO-initialized CR-MODE."""
 from __future__ import annotations
 
 import json
@@ -12,7 +12,12 @@ from src.rl_init.heuristic_initializer import create_composite_heuristic_individ
 from src.rl_init.init_evaluator import evaluate_init_individual, get_selected_rsum
 from src.rl_init.diversity_filter import filter_population_by_diversity, priority_l2_distance, hamming_distance_deployment
 from src.rl_init.logger import save_rows
-from src.rl_init.checkpoint import save_checkpoint, load_checkpoint
+from src.rl_init.checkpoint import (
+    save_checkpoint,
+    load_checkpoint,
+    resolve_checkpoint_path,
+    build_checkpoint_meta,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger("DRLInitPopulationGenerator")
@@ -24,10 +29,11 @@ TRAINING_LOG_COLUMNS = [
     "cv_sink", "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "repair_iter",
     "repair_success", "num_sensors", "num_aps", "invalid_action_count", "loss", "policy_loss",
     "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "fallback_reason", "policy_source", "torch_available",
+    "checkpoint_compatible", "checkpoint_skip_reason", "checkpoint_error", "checkpoint_mode", "config_hash",
 ]
 
 
-def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", policy_source="trained", torch_available=False):
+def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", policy_source="trained", torch_available=False, checkpoint_compatible=False, checkpoint_skip_reason="", checkpoint_error="", checkpoint_mode="", config_hash=""):
     row = {key: np.nan for key in TRAINING_LOG_COLUMNS}
     row.update({
         "episode": -1,
@@ -40,6 +46,11 @@ def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", polic
         "fallback_reason": fallback_reason,
         "policy_source": policy_source,
         "torch_available": torch_available,
+        "checkpoint_compatible": checkpoint_compatible,
+        "checkpoint_skip_reason": checkpoint_skip_reason,
+        "checkpoint_error": checkpoint_error,
+        "checkpoint_mode": checkpoint_mode,
+        "config_hash": config_hash,
     })
     return row
 
@@ -59,6 +70,13 @@ class DRLInitPopulationGenerator:
         self.loaded_checkpoint = False
         self.policy_source = "trained"
         self.torch_available = False
+        self.checkpoint_compatible = False
+        self.checkpoint_skip_reason = ""
+        self.checkpoint_error = ""
+        self.checkpoint_mode = str(self.cfg.get("checkpoint_mode", "per_seed"))
+        self.config_hash = ""
+        self.checkpoint_load_seconds = 0.0
+        self.pretrain_seconds = 0.0
         self.summary = {}
         self.generation_seconds = 0.0
 
@@ -69,14 +87,28 @@ class DRLInitPopulationGenerator:
             from src.rl_init.ppo_trainer import PPOTrainer
             self.torch_available = True
             self.trainer = PPOTrainer(self.ctx, self.config)
-            checkpoint_path = self.cfg.get("checkpoint_path", "experiments/checkpoints/drl_init_policy.pt")
-            if (not self.cfg.get("force_retrain", False)) and self.cfg.get("load_checkpoint_if_exists", True) and load_checkpoint(self.trainer.agent, checkpoint_path):
+            checkpoint_path = resolve_checkpoint_path(self.config, seed=self.cfg.get("seed", 42))
+            self.policy_path = checkpoint_path
+            expected_meta = build_checkpoint_meta(self.trainer.agent, self.ctx, self.config, self.checkpoint_mode)
+            self.config_hash = expected_meta.get("config_hash", "")
+            load_result = {"loaded": False, "compatible": False, "skip_reason": "load_disabled", "error": ""}
+            if (not self.cfg.get("force_retrain", False)) and self.cfg.get("load_checkpoint_if_exists", True):
+                load_start = time.time()
+                load_result = load_checkpoint(self.trainer.agent, checkpoint_path, expected_meta=expected_meta)
+                self.checkpoint_load_seconds = time.time() - load_start
+            self.checkpoint_compatible = bool(load_result.get("compatible", False))
+            self.checkpoint_skip_reason = str(load_result.get("skip_reason", ""))
+            self.checkpoint_error = str(load_result.get("error", ""))
+            if load_result.get("loaded", False):
                 self.loaded_checkpoint = True
                 self.policy_source = "loaded_checkpoint"
-                self.policy_path = checkpoint_path
-                self.training_log = [_training_log_placeholder(True, "", "loaded_checkpoint", True)]
+                self.training_log = [_training_log_placeholder(
+                    True, "", "loaded_checkpoint", True, True, "", "", self.checkpoint_mode, self.config_hash
+                )]
                 self.train_seconds = 0.0
                 return self.training_log
+            if self.checkpoint_skip_reason and self.checkpoint_skip_reason not in {"missing_checkpoint", "load_disabled"}:
+                logger.warning(f"Skipping PPO checkpoint {checkpoint_path}: {self.checkpoint_skip_reason} {self.checkpoint_error}")
             self.training_log = self.trainer.train()
             self.loaded_checkpoint = False
             self.policy_source = "trained"
@@ -86,13 +118,26 @@ class DRLInitPopulationGenerator:
                 row.setdefault("fallback_reason", "")
                 row.setdefault("policy_source", self.policy_source)
                 row.setdefault("torch_available", self.torch_available)
+                row.setdefault("checkpoint_compatible", self.checkpoint_compatible)
+                row.setdefault("checkpoint_skip_reason", self.checkpoint_skip_reason)
+                row.setdefault("checkpoint_error", self.checkpoint_error)
+                row.setdefault("checkpoint_mode", self.checkpoint_mode)
+                row.setdefault("config_hash", self.config_hash)
             if self.cfg.get("save_checkpoint", True):
-                self.policy_path = save_checkpoint(self.trainer.agent, checkpoint_path)
+                self.policy_path = save_checkpoint(self.trainer.agent, checkpoint_path, meta=expected_meta)
+                self.checkpoint_compatible = bool(self.policy_path)
+                for row in self.training_log:
+                    row["checkpoint_compatible"] = self.checkpoint_compatible
         except ImportError as exc:
             logger.warning(f"PyTorch unavailable; DRL initializer will use heuristic/random fallback: {exc}")
-            self.training_log = [_training_log_placeholder(False, "torch_unavailable", "fallback", False)]
+            self.training_log = [_training_log_placeholder(
+                False, "torch_unavailable", "fallback", False, False, "torch_unavailable", str(exc), self.checkpoint_mode, self.config_hash
+            )]
             self.policy_source = "fallback"
             self.torch_available = False
+            self.checkpoint_compatible = False
+            self.checkpoint_skip_reason = "torch_unavailable"
+            self.checkpoint_error = str(exc)
             self.train_seconds = 0.0
         return self.training_log
 
@@ -217,6 +262,14 @@ class DRLInitPopulationGenerator:
             "train_episodes": int(self.cfg.get("train_episodes", 0)),
             "drl_training_time": self.train_seconds,
             "generation_time": self.generation_seconds,
+            "init_generation_time": self.generation_seconds,
+            "pretrain_time_seconds": self.pretrain_seconds,
+            "checkpoint_load_time_seconds": self.checkpoint_load_seconds,
+            "checkpoint_compatible": self.checkpoint_compatible,
+            "checkpoint_skip_reason": self.checkpoint_skip_reason,
+            "checkpoint_error": self.checkpoint_error,
+            "checkpoint_mode": self.checkpoint_mode,
+            "config_hash": self.config_hash,
             "accepted_drl_count": self.accepted_counts.get("drl", 0),
             "accepted_heuristic_count": self.accepted_counts.get("heuristic", 0),
             "accepted_random_count": self.accepted_counts.get("random", 0),

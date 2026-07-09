@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 """WSN/TEG deployment experiment entry point."""
 from __future__ import annotations
 
@@ -111,6 +111,7 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None)
     config = copy.deepcopy(config)
     seed = int(seed if seed is not None else config.get("experiment", {}).get("seeds", [42])[0])
     config.setdefault("experiment", {})["seeds"] = [seed]
+    config.setdefault("drl_init", {})["seed"] = seed
     config.setdefault("runtime", {})["output_dir"] = output_dir
     set_seed(seed)
     logger.info(f"Seed={seed}, algorithm={algorithm}")
@@ -197,6 +198,7 @@ def run_compare_experiment(config):
     _plot_pareto_compare(pareto_by_algorithm["actual"], os.path.join(root, "figures", "pareto_compare_all.png"), "Rsum actual (Mbps)")
     _plot_history_compare(histories, "HV", os.path.join(root, "figures", "hv_compare_all.png"), "Hypervolume")
     _plot_history_compare(histories, "FR_current", os.path.join(root, "figures", "fr_compare_all.png"), "Feasible Ratio")
+    _write_experiment_validity_report(summaries, os.path.join(root, "experiment_validity_report.md"))
     logger.info("summary_all_algorithms.csv generated")
     logger.info("pareto_compare_actual.png generated")
     logger.info("pareto_compare_capacity.png generated")
@@ -405,16 +407,26 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         accepted = getattr(algo, "accepted_counts", {}) or {}
         drl_training_time = float(getattr(algo, "init_train_seconds", 0.0))
         generation_time = float(getattr(algo, "init_generation_seconds", 0.0))
-        online_optimization_time = max(float(runtime_seconds) - drl_training_time, 0.0)
+        checkpoint_load_time = float(getattr(algo, "checkpoint_load_seconds", 0.0))
+        pretrain_time = float(getattr(algo, "pretrain_seconds", 0.0))
+        online_optimization_time = max(float(runtime_seconds) - drl_training_time - checkpoint_load_time - generation_time, 0.0)
         summary.update({
             "drl_training_time": drl_training_time,
             "online_optimization_time": online_optimization_time,
             "total_time": float(runtime_seconds),
             "generation_time": generation_time,
+            "init_generation_time": generation_time,
+            "pretrain_time_seconds": pretrain_time,
+            "checkpoint_load_time_seconds": checkpoint_load_time,
             "loaded_checkpoint": bool(getattr(algo, "loaded_checkpoint", False)),
             "policy_source": getattr(algo, "policy_source", ""),
             "checkpoint_path": getattr(algo, "checkpoint_path", "") or getattr(algo, "init_policy_path", ""),
             "torch_available": bool(getattr(algo, "torch_available", False)),
+            "checkpoint_compatible": bool(getattr(algo, "checkpoint_compatible", False)),
+            "checkpoint_skip_reason": getattr(algo, "checkpoint_skip_reason", ""),
+            "checkpoint_error": getattr(algo, "checkpoint_error", ""),
+            "checkpoint_mode": getattr(algo, "checkpoint_mode", ""),
+            "config_hash": getattr(algo, "config_hash", ""),
             "init_FR_before_repair": float(np.mean([bool(row.get("feasible_before_repair", False)) for row in init_metrics])) if init_metrics else 0.0,
             "init_CV_before_repair": float(np.mean([float(row.get("cv_before_repair", row["cv"])) for row in init_metrics])) if init_metrics else float("nan"),
             "init_FR_after_repair": float(np.mean(init_feasible)) if init_feasible else 0.0,
@@ -483,6 +495,75 @@ def _save_recommended_all_csv(summaries, path):
         writer.writeheader()
         for summary in summaries:
             writer.writerow({key: _json_ready(summary).get(key, "") for key in fields})
+
+
+def _write_experiment_validity_report(summaries, path):
+    if not summaries:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    drl_rows = [row for row in summaries if row.get("algorithm") == "drl_init_cr_mode"]
+    fallback = [row for row in drl_rows if row.get("policy_source") == "fallback" or str(row.get("torch_available", "")).lower() == "false"]
+    incompatible = [row for row in drl_rows if str(row.get("checkpoint_compatible", "")).lower() == "false"]
+    saturated = [row for row in summaries if float(row.get("saturated_link_ratio", 0.0) or 0.0) > 0.9]
+    pareto_single = [row for row in summaries if int(row.get("pareto_count", 0) or 0) <= 1]
+    lines = [
+        "# Experiment Validity Report",
+        "",
+        "## Environment Checks",
+        "",
+        "- Python/YAML/pytest: see command output from the run context.",
+        f"- DRL-Init runs: {len(drl_rows)}",
+        f"- Fallback runs: {len(fallback)}",
+        f"- Incompatible checkpoint runs: {len(incompatible)}",
+        "",
+        "## DRL-Init Checkpoints",
+        "",
+        "| seed | policy_source | torch_available | checkpoint_mode | checkpoint_compatible | checkpoint_path | config_hash |",
+        "|---:|---|---|---|---|---|---|",
+    ]
+    for row in drl_rows:
+        lines.append(
+            f"| {row.get('seed', '')} | {row.get('policy_source', '')} | {row.get('torch_available', '')} | "
+            f"{row.get('checkpoint_mode', '')} | {row.get('checkpoint_compatible', '')} | "
+            f"{row.get('checkpoint_path', '')} | {row.get('config_hash', '')} |"
+        )
+    lines.extend([
+        "",
+        "## Final Metrics",
+        "",
+        "| algorithm | seed | FR | CV | HV | Pareto | best Rsum actual | saturated_link_ratio |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for row in summaries:
+        lines.append(
+            f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('final_FR_after_repair', '')} | "
+            f"{row.get('final_CV_after_repair', '')} | {row.get('final_HV', '')} | {row.get('pareto_count', '')} | "
+            f"{row.get('best_rsum_actual', '')} | {row.get('saturated_link_ratio', '')} |"
+        )
+    lines.extend([
+        "",
+        "## DRL-Init Initial Population",
+        "",
+        "| seed | init FR | init CV | init diversity | accepted drl | heuristic | random |",
+        "|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for row in drl_rows:
+        lines.append(
+            f"| {row.get('seed', '')} | {row.get('init_FR_after_repair', '')} | {row.get('init_CV_after_repair', '')} | "
+            f"{row.get('init_diversity', '')} | {row.get('accepted_drl_count', '')} | "
+            f"{row.get('accepted_heuristic_count', '')} | {row.get('accepted_random_count', '')} |"
+        )
+    status = "PASS" if not fallback and not incompatible and not saturated and not pareto_single else "REVIEW"
+    lines.extend([
+        "",
+        "## Validity Verdict",
+        "",
+        f"- Status: {status}",
+        f"- Rsum saturation concerns: {len(saturated)}",
+        f"- Pareto count <= 1 concerns: {len(pareto_single)}",
+    ])
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 def _feasible_metric_points(solutions, metadata_key):
@@ -585,3 +666,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

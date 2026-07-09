@@ -1,4 +1,4 @@
-﻿"""Convert selected candidate orders into MODE priority individuals."""
+"""Convert selected candidate orders into MODE priority individuals."""
 from __future__ import annotations
 
 import numpy as np

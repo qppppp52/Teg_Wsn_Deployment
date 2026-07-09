@@ -1,4 +1,4 @@
-﻿drl_init:
+drl_init:
   enabled: true
   algorithm: ppo
   mode: train_then_generate
@@ -83,8 +83,12 @@
   save_checkpoint: true
   load_checkpoint_if_exists: true
   force_retrain: false
-  checkpoint_path: experiments/checkpoints/drl_init_policy.pt
+  checkpoint_mode: per_seed
+  checkpoint_dir: experiments/checkpoints
+  checkpoint_name_template: "drl_init_{scene_name}_{throughput_metric}_seed_{seed}.pt"
+  checkpoint_name_template_shared: "drl_init_{scene_name}_{throughput_metric}_shared.pt"
   save_training_log: true
   save_generated_population: true
+
 
 

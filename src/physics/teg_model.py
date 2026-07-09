@@ -1,4 +1,4 @@
-﻿"""TEG energy-harvesting model.
+"""TEG energy-harvesting model.
 
 The thermal-resistance branch follows the modeling PDF:
     R_sink_grid = 1 / (h_sink * A_grid)

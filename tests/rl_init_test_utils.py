@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from src.model.problem_context import ProblemContext
 from src.utils.index_mapping import IndexMapping
 

@@ -1,4 +1,4 @@
-﻿deployment:
+deployment:
   max_aps: 3
   max_sensors: 15
 discretization:

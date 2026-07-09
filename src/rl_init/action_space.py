@@ -1,4 +1,4 @@
-﻿"""Joint candidate-role action helpers for DRL initialization."""
+"""Joint candidate-role action helpers for DRL initialization."""
 from __future__ import annotations
 
 ROLE_SENSOR = 0

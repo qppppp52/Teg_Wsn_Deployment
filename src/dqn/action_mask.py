@@ -1,4 +1,4 @@
-﻿"""Action masking rules for DQN-CR-MODE."""
+"""Action masking rules for DQN-CR-MODE."""
 from __future__ import annotations
 
 import numpy as np

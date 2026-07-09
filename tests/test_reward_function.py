@@ -1,4 +1,4 @@
-﻿from src.dqn.reward_function import compute_reward
+from src.dqn.reward_function import compute_reward
 from src.rl_init.reward import compute_step_reward
 
 

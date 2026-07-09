@@ -1,4 +1,4 @@
-﻿from src.rl_init.reward import compute_step_reward
+from src.rl_init.reward import compute_step_reward
 
 
 def test_rl_init_step_reward_rewards_estimated_improvement():

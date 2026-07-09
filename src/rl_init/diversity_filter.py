@@ -1,4 +1,4 @@
-﻿"""Diversity filters for DRL-generated initial populations."""
+"""Diversity filters for DRL-generated initial populations."""
 from __future__ import annotations
 
 import numpy as np

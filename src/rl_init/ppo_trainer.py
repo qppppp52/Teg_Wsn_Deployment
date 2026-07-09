@@ -1,4 +1,4 @@
-﻿"""Training loop for PPO initialization."""
+"""Training loop for PPO initialization."""
 from __future__ import annotations
 
 import time
