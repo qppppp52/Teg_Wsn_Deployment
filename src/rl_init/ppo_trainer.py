@@ -88,6 +88,7 @@ def _episode_log_row(ep, episode_steps, total_steps, total_reward, step_reward_s
         "cv_sink": info.get("cv_sink", np.nan),
         "cv_service": info.get("cv_service", np.nan),
         "coverage": info.get("coverage", np.nan),
+        "rsum": info.get("rsum", np.nan),
         "rsum_actual": info.get("rsum_actual", np.nan),
         "rsum_capacity": info.get("rsum_capacity", np.nan),
         "repair_iter": info.get("repair_iter", np.nan),
@@ -102,3 +103,4 @@ def _episode_log_row(ep, episode_steps, total_steps, total_reward, step_reward_s
         "approx_kl": stats.get("approx_kl", np.nan),
         "loaded_checkpoint": False,
     }
+

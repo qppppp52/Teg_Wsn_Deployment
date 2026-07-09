@@ -9,13 +9,38 @@ from src.model.individual import create_random_individual
 from src.model.population import Population
 from src.rl_init.env import InitDeploymentEnv
 from src.rl_init.heuristic_initializer import create_composite_heuristic_individual
-from src.rl_init.init_evaluator import evaluate_init_individual
+from src.rl_init.init_evaluator import evaluate_init_individual, get_selected_rsum
 from src.rl_init.diversity_filter import filter_population_by_diversity, priority_l2_distance, hamming_distance_deployment
 from src.rl_init.logger import save_rows
 from src.rl_init.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.logger import get_logger
 
 logger = get_logger("DRLInitPopulationGenerator")
+
+
+TRAINING_LOG_COLUMNS = [
+    "episode", "step", "episode_steps", "episode_reward", "total_reward", "step_reward_sum",
+    "terminal_reward", "feasible", "cv", "cv_deploy", "cv_link", "cv_capacity", "cv_energy",
+    "cv_sink", "cv_service", "coverage", "rsum", "rsum_actual", "rsum_capacity", "repair_iter",
+    "repair_success", "num_sensors", "num_aps", "invalid_action_count", "loss", "policy_loss",
+    "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "fallback_reason", "policy_source",
+]
+
+
+def _training_log_placeholder(loaded_checkpoint=False, fallback_reason="", policy_source="trained"):
+    row = {key: np.nan for key in TRAINING_LOG_COLUMNS}
+    row.update({
+        "episode": -1,
+        "step": 0,
+        "episode_steps": 0,
+        "episode_reward": 0.0,
+        "total_reward": 0.0,
+        "step_reward_sum": 0.0,
+        "loaded_checkpoint": loaded_checkpoint,
+        "fallback_reason": fallback_reason,
+        "policy_source": policy_source,
+    })
+    return row
 
 
 class DRLInitPopulationGenerator:
@@ -31,6 +56,9 @@ class DRLInitPopulationGenerator:
         self.accepted_counts = {"drl": 0, "heuristic": 0, "random": 0}
         self.policy_path = ""
         self.loaded_checkpoint = False
+        self.policy_source = "trained"
+        self.torch_available = False
+        self.summary = {}
         self.generation_seconds = 0.0
 
     def train(self):
@@ -38,33 +66,31 @@ class DRLInitPopulationGenerator:
             return self.training_log
         try:
             from src.rl_init.ppo_trainer import PPOTrainer
+            self.torch_available = True
             self.trainer = PPOTrainer(self.ctx, self.config)
             checkpoint_path = self.cfg.get("checkpoint_path", "experiments/checkpoints/drl_init_policy.pt")
             if (not self.cfg.get("force_retrain", False)) and self.cfg.get("load_checkpoint_if_exists", True) and load_checkpoint(self.trainer.agent, checkpoint_path):
                 self.loaded_checkpoint = True
+                self.policy_source = "loaded_checkpoint"
                 self.policy_path = checkpoint_path
-                self.training_log = [{
-                    "episode": -1,
-                    "step": 0,
-                    "episode_reward": 0.0,
-                    "loss": 0.0,
-                    "policy_loss": 0.0,
-                    "value_loss": 0.0,
-                    "entropy": 0.0,
-                    "loaded_checkpoint": True,
-                }]
+                self.training_log = [_training_log_placeholder(True, "", "loaded_checkpoint")]
                 self.train_seconds = 0.0
                 return self.training_log
             self.training_log = self.trainer.train()
             self.loaded_checkpoint = False
+            self.policy_source = "trained"
             self.train_seconds = self.trainer.train_seconds
             for row in self.training_log:
                 row.setdefault("loaded_checkpoint", False)
+                row.setdefault("fallback_reason", "")
+                row.setdefault("policy_source", self.policy_source)
             if self.cfg.get("save_checkpoint", True):
                 self.policy_path = save_checkpoint(self.trainer.agent, checkpoint_path)
         except ImportError as exc:
             logger.warning(f"PyTorch unavailable; DRL initializer will use heuristic/random fallback: {exc}")
-            self.training_log = [{"loaded_checkpoint": False, "fallback_reason": "torch_unavailable"}]
+            self.training_log = [_training_log_placeholder(False, "torch_unavailable", "fallback")]
+            self.policy_source = "fallback"
+            self.torch_available = False
             self.train_seconds = 0.0
         return self.training_log
 
@@ -126,9 +152,9 @@ class DRLInitPopulationGenerator:
             prev_items = accepted_final[:idx]
             priority_distances = [priority_l2_distance(item["individual"], prev["individual"]) for prev in prev_items]
             hamming_distances = [hamming_distance_deployment(sol, prev["solution"]) for prev in prev_items if prev.get("solution") is not None]
-            priority_dist = float(min(priority_distances)) if priority_distances else 0.0
-            hamming_dist = float(min(hamming_distances)) if hamming_distances else 0.0
-            diversity_score = float(max(priority_dist, hamming_dist))
+            priority_dist = float(min(priority_distances)) if priority_distances else float("nan")
+            hamming_dist = float(min(hamming_distances)) if hamming_distances else float("nan")
+            diversity_score = float(0.5 * priority_dist + 0.5 * hamming_dist) if priority_distances and hamming_distances else float("nan")
             self.init_metrics.append({
                 "individual_id": idx,
                 "source_type": item["source_type"],
@@ -144,7 +170,7 @@ class DRLInitPopulationGenerator:
                 "cv_sink": getattr(sol, "cv_sink", 0.0),
                 "cv_service": getattr(sol, "cv_service", 0.0),
                 "coverage": sol.coverage,
-                "rsum": sol.throughput,
+                "rsum": get_selected_rsum(sol, self.config),
                 "rsum_actual": sol.metadata.get("throughput_actual", sol.throughput),
                 "rsum_capacity": sol.metadata.get("throughput_capacity", sol.throughput),
                 "repair_iter": getattr(sol, "repair_iter", 0),
@@ -178,12 +204,14 @@ class DRLInitPopulationGenerator:
         feasible_after = [bool(row.get("feasible", False)) for row in self.init_metrics]
         cv_before = [float(row.get("cv_before_repair", row.get("cv", 0.0))) for row in self.init_metrics]
         cv_after = [float(row.get("cv", 0.0)) for row in self.init_metrics]
+        finite_diversity = [float(row.get("diversity_score", 0.0)) for row in self.init_metrics if np.isfinite(float(row.get("diversity_score", 0.0)))]
         summary = {
             "algorithm": "drl_init_cr_mode",
             "policy_algorithm": "ppo",
             "loaded_checkpoint": self.loaded_checkpoint,
             "checkpoint_path": self.policy_path,
-            "policy_source": "loaded_checkpoint" if self.loaded_checkpoint else ("trained" if self.trainer is not None else "fallback"),
+            "policy_source": self.policy_source,
+            "torch_available": self.torch_available,
             "train_episodes": int(self.cfg.get("train_episodes", 0)),
             "drl_training_time": self.train_seconds,
             "generation_time": self.generation_seconds,
@@ -194,10 +222,13 @@ class DRLInitPopulationGenerator:
             "init_CV_before_repair": float(np.mean(cv_before)) if cv_before else 0.0,
             "init_FR_after_repair": float(np.mean(feasible_after)) if feasible_after else 0.0,
             "init_CV_after_repair": float(np.mean(cv_after)) if cv_after else 0.0,
-            "init_diversity": float(np.mean([row.get("diversity_score", 0.0) for row in self.init_metrics])) if self.init_metrics else 0.0,
+            "init_diversity": float(np.mean(finite_diversity)) if finite_diversity else 0.0,
             "init_best_coverage": max([float(row.get("coverage", 0.0)) for row in self.init_metrics], default=0.0),
+            "init_best_rsum": max([float(row.get("rsum", 0.0)) for row in self.init_metrics], default=0.0),
             "init_best_rsum_actual": max([float(row.get("rsum_actual", 0.0)) for row in self.init_metrics], default=0.0),
             "init_best_rsum_capacity": max([float(row.get("rsum_capacity", 0.0)) for row in self.init_metrics], default=0.0),
         }
+        self.summary = summary
         with open(os.path.join(data_dir, "drl_init_summary.json"), "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
+

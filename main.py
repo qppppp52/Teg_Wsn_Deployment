@@ -149,6 +149,8 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None)
     feasible_objectives = archive.get_feasible_objectives()
     if len(feasible_objectives) > 0:
         _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front.png"), algorithm)
+        _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front_actual.png"), algorithm, metric_key="throughput_actual", ylabel="Rsum actual (Mbps)")
+        _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front_capacity.png"), algorithm, metric_key="throughput_capacity", ylabel="Rsum capacity (Mbps)")
         rec_solution = representatives.get("recommended_compromise")
         if rec_solution is not None:
             try:
@@ -314,7 +316,7 @@ def _representative_solutions(solutions, config):
     }
 
 
-def _plot_pareto_with_representatives(solutions, representatives, out_path, algorithm):
+def _plot_pareto_with_representatives(solutions, representatives, out_path, algorithm, metric_key=None, ylabel="Rsum (Mbps)"):
     import matplotlib as mpl
     mpl.use("Agg")
     import matplotlib.pyplot as plt
@@ -323,7 +325,8 @@ def _plot_pareto_with_representatives(solutions, representatives, out_path, algo
     if not feasible:
         return
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    objs = np.array([[s.coverage, s.throughput / 1e6] for s in feasible], dtype=float)
+    y_values = [float(s.metadata.get(metric_key, s.throughput)) if metric_key else float(s.throughput) for s in feasible]
+    objs = np.array([[s.coverage, y / 1e6] for s, y in zip(feasible, y_values)], dtype=float)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.scatter(objs[:, 0], objs[:, 1], c="#7FB3D5", s=70, edgecolors="#1B4F72", linewidth=1.0, label="Feasible Pareto")
 
@@ -332,22 +335,23 @@ def _plot_pareto_with_representatives(solutions, representatives, out_path, algo
         "rsum_best": ("s", "#E67E22", "Rsum-best"),
         "recommended_compromise": ("*", "#F1C40F", "Recommended"),
     }
+    feasible_by_id = {id(sol): idx for idx, sol in enumerate(feasible)}
     for role, (marker, color, label) in markers.items():
         solution = representatives.get(role)
-        if solution is None:
+        if solution is None or id(solution) not in feasible_by_id:
             continue
-        ax.scatter([solution.coverage], [solution.throughput / 1e6], marker=marker, c=color, s=180, edgecolors="black", linewidth=1.2, label=label, zorder=5)
-        ax.annotate(label, (solution.coverage, solution.throughput / 1e6), textcoords="offset points", xytext=(8, 8), fontsize=8)
+        idx = feasible_by_id[id(solution)]
+        ax.scatter([solution.coverage], [objs[idx, 1]], marker=marker, c=color, s=180, edgecolors="black", linewidth=1.2, label=label, zorder=5)
+        ax.annotate(label, (solution.coverage, objs[idx, 1]), textcoords="offset points", xytext=(8, 8), fontsize=8)
 
     ax.set_xlabel("Coverage")
-    ax.set_ylabel("Rsum (Mbps)")
+    ax.set_ylabel(ylabel)
     ax.set_title(f"{algorithm}: Pareto Front")
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
-
 
 def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, algo, representatives):
     feasible = [s for s in archive.solutions if s.feasible]
@@ -397,21 +401,31 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         init_metrics = getattr(algo, "init_metrics", [])
         init_cvs = [float(row["cv"]) for row in init_metrics]
         init_feasible = [bool(row["feasible"]) for row in init_metrics]
+        finite_diversity = [float(row.get("diversity_score", 0.0)) for row in init_metrics if np.isfinite(float(row.get("diversity_score", 0.0)))]
         accepted = getattr(algo, "accepted_counts", {}) or {}
         drl_training_time = float(getattr(algo, "init_train_seconds", 0.0))
+        generation_time = float(getattr(algo, "init_generation_seconds", 0.0))
         online_optimization_time = max(float(runtime_seconds) - drl_training_time, 0.0)
         summary.update({
             "drl_training_time": drl_training_time,
             "online_optimization_time": online_optimization_time,
             "total_time": float(runtime_seconds),
+            "generation_time": generation_time,
+            "loaded_checkpoint": bool(getattr(algo, "loaded_checkpoint", False)),
+            "policy_source": getattr(algo, "policy_source", ""),
+            "checkpoint_path": getattr(algo, "checkpoint_path", "") or getattr(algo, "init_policy_path", ""),
+            "torch_available": bool(getattr(algo, "torch_available", False)),
             "init_FR_before_repair": float(np.mean([bool(row.get("feasible_before_repair", False)) for row in init_metrics])) if init_metrics else 0.0,
             "init_CV_before_repair": float(np.mean([float(row.get("cv_before_repair", row["cv"])) for row in init_metrics])) if init_metrics else float("nan"),
             "init_FR_after_repair": float(np.mean(init_feasible)) if init_feasible else 0.0,
             "init_CV_after_repair": float(np.mean(init_cvs)) if init_cvs else float("nan"),
             "init_FR": float(np.mean(init_feasible)) if init_feasible else 0.0,
             "init_CV_mean": float(np.mean(init_cvs)) if init_cvs else float("nan"),
-            "init_diversity": float(np.mean([float(row.get("diversity_score", 0.0)) for row in init_metrics])) if init_metrics else 0.0,
-            "loaded_checkpoint": bool(getattr(algo, "loaded_checkpoint", False)),
+            "init_diversity": float(np.mean(finite_diversity)) if finite_diversity else 0.0,
+            "init_best_coverage": max([float(row.get("coverage", 0.0)) for row in init_metrics], default=0.0),
+            "init_best_rsum": max([float(row.get("rsum", 0.0)) for row in init_metrics], default=0.0),
+            "init_best_rsum_actual": max([float(row.get("rsum_actual", 0.0)) for row in init_metrics], default=0.0),
+            "init_best_rsum_capacity": max([float(row.get("rsum_capacity", 0.0)) for row in init_metrics], default=0.0),
             "accepted_drl_count": int(accepted.get("drl", 0)),
             "accepted_heuristic_count": int(accepted.get("heuristic", 0)),
             "accepted_random_count": int(accepted.get("random", 0)),
