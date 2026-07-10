@@ -42,7 +42,7 @@ BASE_SUMMARY_FIELDS = [
     "saturated_link_ratio", "runtime_seconds",
     "final_FR", "final_CV_mean", "best_rsum", "recommended_rsum",
     "throughput_capacity_best", "throughput_actual_best",
-    "rsum_ref_min", "rsum_ref_max",
+    "rsum_ref_min", "rsum_ref_max", "rsum_reward_normalization",
 ]
 
 
@@ -418,6 +418,7 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         "rsum_capacity_definition": "Shannon theoretical aggregate link capacity before business data-rate capping.",
         "rsum_ref_min": _drl_norm_value(config, "rsum_ref_min", 0.0),
         "rsum_ref_max": _drl_norm_value(config, "rsum_ref_max", 1.0),
+        "rsum_reward_normalization": _rsum_reward_normalization_definition(),
     }
     if algorithm == "dqn_cr_mode":
         training_log = getattr(algo, "training_log", [])
@@ -660,6 +661,7 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
         f"- rsum_ref_min: {_drl_norm_value(config, 'rsum_ref_min', 0.0)}",
         f"- rsum_ref_max: {_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
+        f"- Rsum reward normalization: {_rsum_reward_normalization_definition()}",
         f"- Rsum actual definition: {_rsum_actual_definition(config)}",
         "- Rsum capacity definition: Shannon theoretical aggregate link capacity before business data-rate capping.",
         "- If the paper emphasizes business-rate-capped actual throughput, set `channel.use_data_rate_cap=true`; if it emphasizes theoretical link capability, use `objectives.throughput_metric=capacity` and label figures as capacity.",
@@ -767,12 +769,13 @@ def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None
         f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
         f"- rsum_ref_min: {_drl_norm_value(config, 'rsum_ref_min', 0.0)}",
         f"- rsum_ref_max: {_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
+        f"- rsum_reward_normalization: {_rsum_reward_normalization_definition()}",
         "",
         "## Throughput Semantics",
         "",
         f"- Rsum actual: {_rsum_actual_definition(config)}",
         "- Rsum capacity: Shannon theoretical aggregate link capacity before business data-rate capping.",
-        f"- PPO Rsum reward normalization: min={_drl_norm_value(config, 'rsum_ref_min', 0.0)}, max={_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
+        f"- PPO Rsum reward normalization: {_rsum_reward_normalization_definition()} min={_drl_norm_value(config, 'rsum_ref_min', 0.0)}, max={_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
         "",
         "## Checkpoint And Policy Source",
         "",
@@ -924,6 +927,10 @@ def _run_text_command(cmd):
 
 def _drl_norm_value(config, key, default):
     return config.get("drl_init", {}).get("normalization", {}).get(key, default)
+
+
+def _rsum_reward_normalization_definition():
+    return "interval normalization using rsum_ref_min and rsum_ref_max, clipped to [0, 1]"
 
 
 def _rsum_actual_definition(config):

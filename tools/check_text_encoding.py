@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 TEXT_SUFFIXES = {".py", ".yaml", ".yml", ".md", ".txt"}
-SKIP_DIRS = {".git", ".pytest_cache", "__pycache__", "test_outputs"}
+SKIP_DIRS = {".git", ".pytest_cache", "__pycache__", "test_outputs", ".conda"}
 
 
 def iter_text_files(root: Path):
