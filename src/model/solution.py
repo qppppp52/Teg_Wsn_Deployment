@@ -17,7 +17,7 @@ class Solution:
         self.sensor_harvest_power = np.zeros(num_candidates)
         self.ap_harvest_power = np.zeros(num_candidates)
         self.coverage = 0.0
-        self.throughput = 0.0
+        self.rsum_capacity = 0.0
         self.cv = float("inf")
         self.cv_deploy = 0.0
         self.cv_energy = 0.0
@@ -52,7 +52,7 @@ class Solution:
         new.sensor_harvest_power = self.sensor_harvest_power.copy()
         new.ap_harvest_power = self.ap_harvest_power.copy()
         new.coverage = self.coverage
-        new.throughput = self.throughput
+        new.rsum_capacity = self.rsum_capacity
         new.cv = self.cv
         new.cv_deploy = self.cv_deploy
         new.cv_energy = self.cv_energy

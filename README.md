@@ -9,7 +9,7 @@ This project includes a small reproducible validation scenario for comparing CR-
 - Heat-source temperature: 343.15 K (70 C).
 - Temperature model: `center_air_convection_synthetic`, a simplified center-air convection field with buoyancy, face multipliers, and plume-direction terms. It is for algorithm validation and does not replace high-fidelity ANSYS thermal simulation.
 - Run command: `python main.py --experiment configs/experiment_small_compare.yaml`.
-- Main outputs: `experiments/small_center_heat_compare/<timestamp>/<algorithm>/seed_<seed>/data` and `figures`.
+- Main outputs: `experiments/small_center_heat_compare/<timestamp>/scene_preprocess/shared` for scene preprocessing, plus `<algorithm>/seed_<seed>/data`, `figures`, and `pareto` for algorithm results.
 - Recommended Pareto solution: selected by normalized distance to the ideal point using Coverage and normalized Rsum.
 
-The small scenario also exports `candidate_temperature.csv`, `temperature_faces.png`, `pgrid_distribution.png`, `convergence.csv`, `pareto_solutions.csv`, and `final_summary.json` for each run.
+The small scenario exports shared scene files (`candidate_temperature.csv`, `temperature_faces.png`, and `pgrid_distribution.png`) once per experiment, while algorithm-specific files include `convergence.csv`, `pareto_solutions.csv`, and run summaries.

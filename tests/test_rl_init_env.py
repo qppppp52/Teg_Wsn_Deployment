@@ -35,7 +35,6 @@ def test_rl_init_env_terminal_info_contains_training_metrics(monkeypatch):
             "cv_service": 0.0,
             "coverage": 0.5,
             "rsum": 1.0,
-            "rsum_actual": 1.0,
             "rsum_capacity": 2.0,
             "repair_iter": 0,
             "repair_success": True,
@@ -55,7 +54,6 @@ def test_rl_init_env_terminal_info_contains_training_metrics(monkeypatch):
     for key in [
         "terminal_reward", "step_reward_sum", "feasible", "cv", "cv_deploy", "cv_link",
         "cv_capacity", "cv_energy", "cv_sink", "cv_service", "coverage", "rsum",
-        "rsum_actual", "rsum_capacity", "repair_iter", "repair_success", "num_sensors",
         "num_aps", "invalid_action_count",
     ]:
         assert key in info

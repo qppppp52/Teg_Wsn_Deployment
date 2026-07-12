@@ -74,7 +74,7 @@ class DRLPriorityInitializer:
                 "loss": np.nan,
                 "reward": 0.0,
                 "coverage": 0.0,
-                "throughput": 0.0,
+                "rsum_capacity": 0.0,
                 "cv": np.nan,
                 "feasible": False,
                 "note": "torch_unavailable",
@@ -124,7 +124,7 @@ class DRLPriorityInitializer:
                 "baseline": float(self.baseline),
                 "advantage": float(advantage),
                 "coverage": float(sol.coverage),
-                "throughput": float(components["throughput"]),
+                "rsum_capacity": float(components["rsum_capacity"]),
                 "cv": float(sol.cv),
                 "feasible": bool(sol.feasible),
                 "selected_sensors": int(len(sample["sensor_locals"])),
@@ -263,21 +263,19 @@ class DRLPriorityInitializer:
     def _reward(self, sol):
         cfg = self.config.get("drl_init", {})
         reward_cfg = cfg.get("reward", {})
-        metric = self.config.get("objectives", {}).get("throughput_metric", "actual")
-        throughput_key = "throughput_capacity" if metric == "capacity" else "throughput_actual"
-        throughput = float(sol.metadata.get(throughput_key, sol.throughput))
-        ref = float(reward_cfg.get("throughput_ref", self.config.get("evaluation", {}).get("rsum_ref_max", 2.0e7)))
+        rsum_capacity = float(sol.metadata.get("rsum_capacity", sol.rsum_capacity))
+        ref = float(reward_cfg.get("rsum_capacity_ref", self.config.get("evaluation", {}).get("rsum_ref_max", 2.0e7)))
         ref = max(ref, 1.0)
-        throughput_norm = min(np.log1p(max(throughput, 0.0)) / np.log1p(ref), 2.0)
+        rsum_capacity_norm = min(np.log1p(max(rsum_capacity, 0.0)) / np.log1p(ref), 2.0)
         cv_ref = max(float(reward_cfg.get("cv_ref", self.config.get("constraints", {}).get("cv_pressure_refs", {}).get("total", 20.0))), 1e-12)
         cv_norm = min(float(sol.cv) / cv_ref, 3.0)
         reward = (
             float(reward_cfg.get("coverage_weight", 1.0)) * float(sol.coverage)
-            + float(reward_cfg.get("throughput_weight", 0.35)) * throughput_norm
+            + float(reward_cfg.get("rsum_capacity_weight", 0.35)) * rsum_capacity_norm
             + (float(reward_cfg.get("feasible_bonus", 0.25)) if sol.feasible else 0.0)
             - float(reward_cfg.get("cv_penalty", 0.45)) * cv_norm
         )
-        return float(reward), {"throughput": throughput, "throughput_norm": throughput_norm, "cv_norm": cv_norm}
+        return float(reward), {"rsum_capacity": rsum_capacity, "rsum_capacity_norm": rsum_capacity_norm, "cv_norm": cv_norm}
 
     def _infer_feature_dim(self):
         im = self.ctx.index_mapping

@@ -57,3 +57,8 @@ results/
 
 # Experiment batch outputs
 experiments/
+# Local test-generated experiment outputs
+test_outputs/
+
+# Project-local Conda environment
+.conda/

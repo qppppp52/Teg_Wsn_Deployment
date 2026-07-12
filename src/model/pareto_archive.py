@@ -10,8 +10,8 @@ def _dominates(a, b):
         return False
     if not a.feasible and not b.feasible:
         return a.cv < b.cv
-    return (a.coverage >= b.coverage and a.throughput >= b.throughput and
-            (a.coverage > b.coverage or a.throughput > b.throughput))
+    return (a.coverage >= b.coverage and a.rsum_capacity >= b.rsum_capacity and
+            (a.coverage > b.coverage or a.rsum_capacity > b.rsum_capacity))
 
 
 def _crowding_distance(objs):
@@ -47,7 +47,7 @@ class ParetoArchive:
         # Skip exact duplicates: same (coverage, rsum) pair already stored
         for existing in self.solutions:
             if (abs(existing.coverage - sol.coverage) < 1e-9 and
-                abs(existing.throughput - sol.throughput) < 1e-9):
+                abs(existing.rsum_capacity - sol.rsum_capacity) < 1e-9):
                 return  # duplicate, skip
         dominated = False
         to_remove = []
@@ -78,13 +78,13 @@ class ParetoArchive:
     def get_objectives(self):
         if not self.solutions:
             return np.zeros((0, 2))
-        return np.array([[s.coverage, s.throughput] for s in self.solutions])
+        return np.array([[s.coverage, s.rsum_capacity] for s in self.solutions])
 
     def get_feasible_objectives(self):
         feasible = [s for s in self.solutions if s.feasible]
         if not feasible:
             return np.zeros((0, 2))
-        return np.array([[s.coverage, s.throughput] for s in feasible])
+        return np.array([[s.coverage, s.rsum_capacity] for s in feasible])
 
     def save(self, path):
         from src.io.result_io import save_pareto

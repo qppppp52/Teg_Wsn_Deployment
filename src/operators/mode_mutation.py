@@ -20,7 +20,7 @@ def mutate(individual, F, strategy="standard_rand", population=None, idx=None, c
             m.rho_s = X1.rho_s + F*(X2.rho_s - X3.rho_s)
             m.rho_a = X1.rho_a + F*(X2.rho_a - X3.rho_a)
         elif strategy in {"coverage_guided", "throughput_guided", "best_1", "current_to_best_1"}:
-            key = (lambda s: getattr(s, "throughput", 0.0)) if strategy == "throughput_guided" else _score
+            key = (lambda s: getattr(s, "rsum_capacity", 0.0)) if strategy == "throughput_guided" else _score
             best = _get_best(population, key)
             base = X1 if strategy == "best_1" else individual
             m.rho_s = base.rho_s + F*(best.rho_s - base.rho_s) + F*(X2.rho_s - X3.rho_s)
@@ -55,4 +55,4 @@ def _get_best(pop, key):
 
 
 def _score(ind):
-    return getattr(ind, "coverage", 0.0) + getattr(ind, "throughput", 0.0) / 1e9
+    return getattr(ind, "coverage", 0.0) + getattr(ind, "rsum_capacity", 0.0) / 1e9

@@ -12,7 +12,6 @@ torch = pytest.importorskip("torch")
 BASE_META = {
     "scene_name": "small_center_heat_compare",
     "seed": 42,
-    "throughput_metric": "actual",
     "num_candidates": 5,
     "candidate_feature_dim": 3,
     "global_feature_dim": 4,
@@ -32,7 +31,6 @@ def test_checkpoint_compatible_when_metadata_matches():
 
 @pytest.mark.parametrize("key,value", [
     ("candidate_feature_dim", 5),
-    ("throughput_metric", "capacity"),
     ("scene_name", "other_scene"),
 ])
 def test_checkpoint_incompatible_when_metadata_differs(key, value):
@@ -48,16 +46,15 @@ def test_incompatible_checkpoint_is_not_loaded():
     path = Path("test_outputs") / "checkpoint_incompatible" / "policy.pt"
     save_checkpoint(TinyAgent(), str(path), meta=BASE_META)
     expected = copy.deepcopy(BASE_META)
-    expected["throughput_metric"] = "capacity"
+    expected["candidate_feature_dim"] = 5
     result = load_checkpoint(TinyAgent(), str(path), expected_meta=expected)
     assert result["loaded"] is False
     assert result["compatible"] is False
-    assert result["skip_reason"] == "throughput_metric_mismatch"
+    assert result["skip_reason"] == "candidate_feature_dim_mismatch"
 
 def test_config_hash_changes_when_reward_normalization_changes():
     base = {
         "experiment": {"name": "small_center_heat_compare"},
-        "objectives": {"throughput_metric": "actual"},
         "drl_init": {
             "role_actions": ["sensor", "ap", "skip", "stop"],
             "max_selected_sensors": 10,

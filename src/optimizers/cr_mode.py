@@ -79,12 +79,10 @@ class CRMode(BaseOptimizer):
 
     def _record_convergence(self, gen):
         metrics = record_generation(self.convergence_history, self.population, self.archive, self.config)
-        if metrics.get("saturated_link_ratio", 0.0) > 0.9:
-            logger.warning("Throughput actual is saturated; Pareto front may degenerate.")
 
 
 def _copy_solution_metrics(individual, solution):
     individual.coverage = solution.coverage
-    individual.throughput = solution.throughput
+    individual.rsum_capacity = solution.rsum_capacity
     individual.cv = solution.cv
     individual.feasible = solution.feasible

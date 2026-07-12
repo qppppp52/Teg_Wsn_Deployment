@@ -34,10 +34,10 @@ class Population:
         FR = len(feasible) / len(self.solutions) if self.solutions else 0
         CVs = [s.cv for s in self.solutions]
         cov_all = [s.coverage for s in self.solutions]
-        rsum_all = [s.throughput for s in self.solutions]
+        rsum_all = [s.rsum_capacity for s in self.solutions]
         if feasible:
             cov_feas = float(np.mean([s.coverage for s in feasible]))
-            rsum_feas = float(np.mean([s.throughput for s in feasible]))
+            rsum_feas = float(np.mean([s.rsum_capacity for s in feasible]))
         else:
             cov_feas = float("nan")
             rsum_feas = float("nan")

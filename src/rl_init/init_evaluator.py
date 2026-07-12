@@ -17,10 +17,7 @@ def evaluate_init_individual(individual, ctx, config, source_type="unknown") -> 
 
 
 def get_selected_rsum(solution, config) -> float:
-    metric = config.get("objectives", {}).get("throughput_metric", "actual")
-    if metric == "capacity":
-        return float(solution.metadata.get("throughput_capacity", solution.throughput))
-    return float(solution.metadata.get("throughput_actual", solution.throughput))
+    return float(solution.metadata.get("rsum_capacity", solution.rsum_capacity))
 
 
 def quality_score(solution, config) -> float:

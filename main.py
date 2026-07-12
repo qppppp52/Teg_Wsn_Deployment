@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """WSN/TEG deployment experiment entry point."""
 from __future__ import annotations
 
@@ -16,7 +15,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.io.config_reader import load_config, load_experiment_config
+from src.io.config_reader import load_experiment_config
 from src.scene.scenario_builder import Scenario
 from src.preprocessing.preprocessor import run_preprocessing
 from src.optimizers.cr_mode import CRMode
@@ -36,12 +35,9 @@ logger = get_logger("main")
 BASE_SUMMARY_FIELDS = [
     "algorithm", "seed", "final_FR_after_repair", "final_CV_after_repair",
     "final_HV", "archive_size", "pareto_count", "best_coverage",
-    "best_rsum_actual", "best_rsum_capacity", "recommended_coverage",
-    "recommended_rsum_actual", "recommended_rsum_capacity",
     "first_feasible_generation", "mean_repair_iter", "repair_success_rate",
-    "saturated_link_ratio", "runtime_seconds",
-    "final_FR", "final_CV_mean", "best_rsum", "recommended_rsum",
-    "throughput_capacity_best", "throughput_actual_best",
+    "final_FR", "final_CV_mean", "best_rsum_capacity", "recommended_rsum_capacity",
+    "rsum_capacity_best",
     "rsum_ref_min", "rsum_ref_max", "rsum_reward_normalization",
 ]
 
@@ -108,7 +104,7 @@ def _make_optimizer(algorithm, ctx, config):
     raise ValueError(f"Unknown algorithm: {algorithm}")
 
 
-def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None):
+def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None, preprocess_output_dir=None, save_preprocess_outputs=True):
     """Run one algorithm once and write standardized outputs."""
     config = copy.deepcopy(config)
     seed = int(seed if seed is not None else config.get("experiment", {}).get("seeds", [42])[0])
@@ -138,9 +134,13 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None)
     archive.save(os.path.join(pareto_dir, f"{algorithm}.npz"))
     _save_context(ctx, os.path.join(pareto_dir, f"{algorithm}_context.npz"))
     _save_heat_sources(ctx, seed, os.path.join(pareto_dir, f"{algorithm}_heat_sources.npz"))
-    export_candidate_temperature(ctx, os.path.join(data_dir, "candidate_temperature.csv"))
-    plot_temperature_faces(ctx, os.path.join(fig_dir, "temperature_faces.png"))
-    plot_pgrid_distribution(ctx, os.path.join(fig_dir, "pgrid_distribution.png"))
+    if save_preprocess_outputs:
+        preprocess_dir = preprocess_output_dir or output_dir
+        preprocess_data_dir = os.path.join(preprocess_dir, "data")
+        preprocess_fig_dir = os.path.join(preprocess_dir, "figures")
+        export_candidate_temperature(ctx, os.path.join(preprocess_data_dir, "candidate_temperature.csv"))
+        plot_temperature_faces(ctx, os.path.join(preprocess_fig_dir, "temperature_faces.png"))
+        plot_pgrid_distribution(ctx, os.path.join(preprocess_fig_dir, "pgrid_distribution.png"))
 
     history = getattr(algo, "convergence_history", {})
     representatives = _representative_solutions(archive.solutions, config)
@@ -152,8 +152,7 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None)
     feasible_objectives = archive.get_feasible_objectives()
     if len(feasible_objectives) > 0:
         _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front.png"), algorithm)
-        _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front_actual.png"), algorithm, metric_key="throughput_actual", ylabel="Rsum actual (Mbps)")
-        _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front_capacity.png"), algorithm, metric_key="throughput_capacity", ylabel="Rsum capacity (Mbps)")
+        _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front_capacity.png"), algorithm, metric_key="rsum_capacity", ylabel="Rsum Capacity (Mbps)")
         rec_solution = representatives.get("recommended_compromise")
         if rec_solution is not None:
             try:
@@ -182,23 +181,26 @@ def run_compare_experiment(config):
     experiment_start = datetime.now()
     summaries = []
     histories = {}
-    pareto_by_algorithm = {"actual": {}, "capacity": {}}
+    pareto_by_algorithm = {"capacity": {}}
 
     for algorithm in algorithms:
         for seed in seeds:
             out_dir = os.path.join(root, algorithm, f"seed_{seed}")
-            archive, summary, history = run_experiment(config, algorithm, out_dir, seed)
+            preprocess_dir = os.path.join(root, "scene_preprocess", "shared")
+            save_preprocess = algorithm == algorithms[0] and seed == seeds[0]
+            archive, summary, history = run_experiment(
+                config, algorithm, out_dir, seed,
+                preprocess_output_dir=preprocess_dir,
+                save_preprocess_outputs=save_preprocess,
+            )
             summaries.append(summary)
             histories[(algorithm, seed)] = history
-            pareto_by_algorithm["actual"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "throughput_actual"))
-            pareto_by_algorithm["capacity"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "throughput_capacity"))
+            pareto_by_algorithm["capacity"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "rsum_capacity"))
 
     os.makedirs(os.path.join(root, "figures"), exist_ok=True)
     _save_summary_csv(summaries, os.path.join(root, "summary_all_algorithms.csv"))
     _save_recommended_all_csv(summaries, os.path.join(root, "recommended_solutions_all_algorithms.csv"))
-    _plot_pareto_compare(pareto_by_algorithm["actual"], os.path.join(root, "figures", "pareto_compare_actual.png"), "Rsum actual (Mbps)")
-    _plot_pareto_compare(pareto_by_algorithm["capacity"], os.path.join(root, "figures", "pareto_compare_capacity.png"), "Rsum capacity (Mbps)")
-    _plot_pareto_compare(pareto_by_algorithm["actual"], os.path.join(root, "figures", "pareto_compare_all.png"), "Rsum actual (Mbps)")
+    _plot_pareto_compare(pareto_by_algorithm["capacity"], os.path.join(root, "figures", "pareto_compare_capacity.png"), "Rsum Capacity (Mbps)")
     _plot_history_compare(histories, "HV", os.path.join(root, "figures", "hv_compare_all.png"), "Hypervolume")
     _plot_history_compare(histories, "FR_current", os.path.join(root, "figures", "fr_compare_all.png"), "Feasible Ratio")
     gen0_rows = _build_gen0_compare_rows(histories)
@@ -224,7 +226,6 @@ def run_compare_experiment(config):
         dqn_rows,
     )
     logger.info("summary_all_algorithms.csv generated")
-    logger.info("pareto_compare_actual.png generated")
     logger.info("pareto_compare_capacity.png generated")
 
 
@@ -250,45 +251,19 @@ def _save_pareto_csv(solutions, representatives, path):
     rsum_best = representatives.get("rsum_best")
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "solution_id", "coverage", "rsum_actual", "rsum_capacity", "cv",
-            "active_sensors", "active_aps", "recommended_flag",
-            "coverage_best_flag", "rsum_best_flag",
-        ])
+        writer.writerow(["solution_id", "coverage", "rsum_capacity", "cv", "active_sensors", "active_aps", "recommended_flag", "coverage_best_flag", "rsum_best_flag"])
         for idx, solution in enumerate(feasible):
-            writer.writerow([
-                idx,
-                solution.coverage,
-                solution.metadata.get("throughput_actual", solution.throughput),
-                solution.metadata.get("throughput_capacity", solution.throughput),
-                solution.cv,
-                int(np.sum(solution.x)),
-                int(np.sum(solution.y)),
-                int(solution is rec),
-                int(solution is cov_best),
-                int(solution is rsum_best),
-            ])
+            writer.writerow([idx, solution.coverage, solution.rsum_capacity, solution.cv, int(np.sum(solution.x)), int(np.sum(solution.y)), int(solution is rec), int(solution is cov_best), int(solution is rsum_best)])
 
 def _save_recommended_solution_csv(representatives, path):
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["role", "coverage", "rsum", "throughput_capacity", "throughput_actual", "cv", "num_sensors", "num_aps", "repair_iter"])
+        writer.writerow(["role", "coverage", "rsum_capacity", "cv", "num_sensors", "num_aps", "repair_iter"])
         for role in FACE_REPRESENTATIVE_ROLES:
             solution = representatives.get(role)
             if solution is None:
                 continue
-            writer.writerow([
-                role,
-                solution.coverage,
-                solution.throughput,
-                solution.metadata.get("throughput_capacity", solution.throughput),
-                solution.metadata.get("throughput_actual", solution.throughput),
-                solution.cv,
-                int(np.sum(solution.x)),
-                int(np.sum(solution.y)),
-                getattr(solution, "repair_iter", 0),
-            ])
-
+            writer.writerow([role, solution.coverage, solution.rsum_capacity, solution.cv, int(np.sum(solution.x)), int(np.sum(solution.y)), getattr(solution, "repair_iter", 0)])
 
 def _plot_standard_convergence(history, fig_dir, algorithm, config):
     if not history:
@@ -301,8 +276,7 @@ def _plot_standard_convergence(history, fig_dir, algorithm, config):
     _plot_two_series(history.get("CV_before_repair_mean", []), "Before repair", history.get("CV_after_repair_mean", []), "After repair", "Mean CV", os.path.join(fig_dir, "convergence_cv_before_after.png"), f"{algorithm}: CV before/after repair")
     plot_dual_convergence(history.get("Coverage_feasible", []), "Avg Coverage", history.get("archive_best_coverage", []), "Best Coverage", "Coverage", os.path.join(fig_dir, "convergence_coverage.png"), title=f"{algorithm}: Coverage")
     plot_dual_convergence(history.get("Rsum_feasible_mbps", []), "Avg Rsum Mbps", history.get("archive_best_rsum_mbps", []), "Best Rsum Mbps", "Mbps", os.path.join(fig_dir, "convergence_rsum.png"), title=f"{algorithm}: Rsum", fmt="%.1f")
-    plot_convergence([v / 1e6 for v in history.get("rsum_actual_best", [])], "Best actual Rsum (Mbps)", os.path.join(fig_dir, "convergence_rsum_actual.png"), title=f"{algorithm}: Actual Rsum")
-    plot_convergence([v / 1e6 for v in history.get("rsum_capacity_best", [])], "Best capacity Rsum (Mbps)", os.path.join(fig_dir, "convergence_rsum_capacity.png"), title=f"{algorithm}: Capacity Rsum")
+    plot_convergence([v / 1e6 for v in history.get("rsum_capacity_best", [])], "Best Rsum Capacity (Mbps)", os.path.join(fig_dir, "convergence_rsum_capacity.png"), title=f"{algorithm}: Rsum Capacity")
 
 
 def _plot_two_series(y1, label1, y2, label2, ylabel, out_path, title):
@@ -329,7 +303,7 @@ def _representative_solutions(solutions, config):
     feasible = [s for s in solutions if s.feasible]
     if not feasible:
         return {}
-    objs = np.array([[s.coverage, s.throughput] for s in feasible], dtype=float)
+    objs = np.array([[s.coverage, s.rsum_capacity] for s in feasible], dtype=float)
     rmax = max(float(config.get("evaluation", {}).get("rsum_ref_max", np.max(objs[:, 1]))), 1.0)
     norm = np.column_stack([objs[:, 0], np.clip(objs[:, 1] / rmax, 0.0, 1.0)])
     rec_idx = int(np.argmin(np.linalg.norm(1.0 - norm, axis=1)))
@@ -351,7 +325,7 @@ def _plot_pareto_with_representatives(solutions, representatives, out_path, algo
     if not feasible:
         return
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    y_values = [float(s.metadata.get(metric_key, s.throughput)) if metric_key else float(s.throughput) for s in feasible]
+    y_values = [float(s.metadata.get(metric_key, s.rsum_capacity)) if metric_key else float(s.rsum_capacity) for s in feasible]
     objs = np.array([[s.coverage, y / 1e6] for s, y in zip(feasible, y_values)], dtype=float)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.scatter(objs[:, 0], objs[:, 1], c="#7FB3D5", s=70, edgecolors="#1B4F72", linewidth=1.0, label="Feasible Pareto")
@@ -383,10 +357,8 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
     feasible = [s for s in archive.solutions if s.feasible]
     objs = archive.get_feasible_objectives()
     rec = representatives.get("recommended_compromise")
-    best_actual = _best_metadata_value(feasible, "throughput_actual")
-    best_capacity = _best_metadata_value(feasible, "throughput_capacity")
-    rec_actual = float(rec.metadata.get("throughput_actual", rec.throughput)) if rec is not None else 0.0
-    rec_capacity = float(rec.metadata.get("throughput_capacity", rec.throughput)) if rec is not None else 0.0
+    best_capacity = _best_metadata_value(feasible, "rsum_capacity")
+    rec_capacity = float(rec.metadata.get("rsum_capacity", rec.rsum_capacity)) if rec is not None else 0.0
     summary = {
         "algorithm": algorithm,
         "seed": seed,
@@ -396,26 +368,17 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         "archive_size": len(archive),
         "pareto_count": len(feasible),
         "best_coverage": float(np.max(objs[:, 0])) if len(objs) else 0.0,
-        "best_rsum_actual": best_actual,
         "best_rsum_capacity": best_capacity,
         "recommended_coverage": rec.coverage if rec is not None else 0.0,
-        "recommended_rsum_actual": rec_actual,
         "recommended_rsum_capacity": rec_capacity,
         "first_feasible_generation": _first_feasible_generation(history),
         "mean_repair_iter": history.get("mean_repair_iter", [0.0])[-1] if history else 0.0,
         "repair_success_rate": history.get("repair_success_rate", [0.0])[-1] if history else 0.0,
-        "saturated_link_ratio": history.get("saturated_link_ratio", [0.0])[-1] if history else 0.0,
         "runtime_seconds": runtime_seconds,
         "final_FR": history.get("FR_current", [0.0])[-1] if history else 0.0,
         "final_CV_mean": history.get("CV_mean", [float("nan")])[-1] if history else float("nan"),
-        "best_rsum": float(np.max(objs[:, 1])) if len(objs) else 0.0,
-        "recommended_rsum": rec.throughput if rec is not None else 0.0,
-        "throughput_capacity_best": best_capacity,
-        "throughput_actual_best": best_actual,
-        "use_data_rate_cap": bool(config.get("channel", {}).get("use_data_rate_cap", False)),
-        "throughput_metric": config.get("objectives", {}).get("throughput_metric", "actual"),
-        "rsum_actual_definition": _rsum_actual_definition(config),
-        "rsum_capacity_definition": "Shannon theoretical aggregate link capacity before business data-rate capping.",
+        "rsum_capacity_best": best_capacity,
+        "rsum_capacity_definition": "Aggregate theoretical Shannon link capacity over valid sensor-AP connections.",
         "rsum_ref_min": _drl_norm_value(config, "rsum_ref_min", 0.0),
         "rsum_ref_max": _drl_norm_value(config, "rsum_ref_max", 1.0),
         "rsum_reward_normalization": _rsum_reward_normalization_definition(),
@@ -466,8 +429,6 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
             "init_CV_mean": float(np.mean(init_cvs)) if init_cvs else float("nan"),
             "init_diversity": float(np.mean(finite_diversity)) if finite_diversity else 0.0,
             "init_best_coverage": max([float(row.get("coverage", 0.0)) for row in init_metrics], default=0.0),
-            "init_best_rsum": max([float(row.get("rsum", 0.0)) for row in init_metrics], default=0.0),
-            "init_best_rsum_actual": max([float(row.get("rsum_actual", 0.0)) for row in init_metrics], default=0.0),
             "init_best_rsum_capacity": max([float(row.get("rsum_capacity", 0.0)) for row in init_metrics], default=0.0),
             "accepted_drl_count": int(accepted.get("drl", 0)),
             "accepted_heuristic_count": int(accepted.get("heuristic", 0)),
@@ -482,7 +443,7 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
 def _best_metadata_value(solutions, key):
     if not solutions:
         return 0.0
-    values = [float(s.metadata.get(key, s.throughput)) for s in solutions]
+    values = [float(s.metadata.get(key, s.rsum_capacity)) for s in solutions]
     return float(max(values)) if values else 0.0
 
 
@@ -520,7 +481,7 @@ def _save_summary_csv(summaries, path):
 
 
 def _save_recommended_all_csv(summaries, path):
-    fields = ["algorithm", "seed", "recommended_coverage", "recommended_rsum", "best_coverage", "best_rsum", "final_HV", "final_FR"]
+    fields = ["algorithm", "seed", "recommended_coverage", "recommended_rsum_capacity", "best_coverage", "best_rsum_capacity", "final_HV", "final_FR"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
@@ -542,8 +503,6 @@ def _build_gen0_compare_rows(histories):
             "gen0_FR_after_repair": first("FR_after_repair"),
             "gen0_CV_after_repair": first("CV_after_repair_mean"),
             "gen0_best_coverage": first("coverage_best"),
-            "gen0_best_rsum": first("rsum_actual_best"),
-            "gen0_best_rsum_actual": first("rsum_actual_best"),
             "gen0_best_rsum_capacity": first("rsum_capacity_best"),
             "gen0_pareto_count": first("pareto_count"),
             "gen0_diversity": first("diversity"),
@@ -626,129 +585,61 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
     if not summaries:
         return
     config = config or {}
+    gen0_rows = gen0_rows or []
+    dqn_rows = dqn_rows or []
     os.makedirs(os.path.dirname(path), exist_ok=True)
     drl_rows = [row for row in summaries if row.get("algorithm") == "drl_init_cr_mode"]
     fallback = [row for row in drl_rows if row.get("policy_source") == "fallback" or str(row.get("torch_available", "")).lower() == "false"]
     incompatible = [row for row in drl_rows if str(row.get("checkpoint_compatible", "")).lower() == "false"]
-    saturated = [row for row in summaries if float(row.get("saturated_link_ratio", 0.0) or 0.0) > 0.9]
     pareto_single = [row for row in summaries if int(row.get("pareto_count", 0) or 0) <= 1]
-    gen0_rows = gen0_rows or []
-    dqn_rows = dqn_rows or []
     evidence = _collect_reproducibility_evidence(config, command, start_time, end_time)
     lines = [
-        "# Experiment Validity Report",
-        "",
-        "## Reproducibility Evidence",
-        "",
-        f"- Git branch: {evidence['git_branch']}",
-        f"- Git commit: {evidence['git_commit']}",
-        f"- Git dirty: {evidence['git_dirty']}",
-        f"- Python: {evidence['python']}",
-        f"- Torch: {evidence['torch']}",
-        f"- NumPy: {evidence['numpy']}",
-        f"- PyYAML: {evidence['pyyaml']}",
-        f"- py_compile: {evidence['py_compile']}",
-        f"- YAML parse: {evidence['yaml_parse']}",
-        f"- pytest: {evidence['pytest']}",
-        f"- Full command: `{evidence['command']}`",
-        f"- Experiment start: {evidence['start_time']}",
-        f"- Experiment end: {evidence['end_time']}",
-        f"- Runtime seconds: {evidence['runtime_seconds']}",
-        "",
-        "## Throughput Semantics",
-        "",
-        f"- use_data_rate_cap: {config.get('channel', {}).get('use_data_rate_cap', False)}",
-        f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
+        "# Experiment Validity Report", "", "## Reproducibility Evidence", "",
+        f"- Git branch: {evidence['git_branch']}", f"- Git commit: {evidence['git_commit']}",
+        f"- Git dirty: {evidence['git_dirty']}", f"- Python: {evidence['python']}",
+        f"- Torch: {evidence['torch']}", f"- NumPy: {evidence['numpy']}",
+        f"- PyYAML: {evidence['pyyaml']}", f"- py_compile: {evidence['py_compile']}",
+        f"- YAML parse: {evidence['yaml_parse']}", f"- pytest: {evidence['pytest']}",
+        f"- Full command: `{evidence['command']}`", f"- Experiment start: {evidence['start_time']}",
+        f"- Experiment end: {evidence['end_time']}", f"- Runtime seconds: {evidence['runtime_seconds']}",
+        "", "## Throughput Semantics", "",
+        "- Rsum objective: `rsum_capacity`, the sum of theoretical Shannon link capacities.",
         f"- rsum_ref_min: {_drl_norm_value(config, 'rsum_ref_min', 0.0)}",
         f"- rsum_ref_max: {_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
         f"- Rsum reward normalization: {_rsum_reward_normalization_definition()}",
-        f"- Rsum actual definition: {_rsum_actual_definition(config)}",
-        "- Rsum capacity definition: Shannon theoretical aggregate link capacity before business data-rate capping.",
-        "- If the paper emphasizes business-rate-capped actual throughput, set `channel.use_data_rate_cap=true`; if it emphasizes theoretical link capability, use `objectives.throughput_metric=capacity` and label figures as capacity.",
-        "",
-        "## Environment Checks",
-        "",
-        f"- DRL-Init runs: {len(drl_rows)}",
-        f"- Fallback runs: {len(fallback)}",
-        f"- Incompatible checkpoint runs: {len(incompatible)}",
-        "",
-        "## DRL-Init Checkpoints",
-        "",
-        "| seed | policy_source | torch_available | checkpoint_mode | checkpoint_compatible | checkpoint_path | config_hash |",
-        "|---:|---|---|---|---|---|---|",
+        "", "## Environment Checks", "",
+        f"- DRL-Init runs: {len(drl_rows)}", f"- Fallback runs: {len(fallback)}",
+        f"- Incompatible checkpoint runs: {len(incompatible)}", "",
+        "## Final Metrics", "",
+        "| algorithm | seed | FR | CV | HV | Pareto | best Rsum capacity |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for row in drl_rows:
-        lines.append(
-            f"| {row.get('seed', '')} | {row.get('policy_source', '')} | {row.get('torch_available', '')} | "
-            f"{row.get('checkpoint_mode', '')} | {row.get('checkpoint_compatible', '')} | "
-            f"{row.get('checkpoint_path', '')} | {row.get('config_hash', '')} |"
-        )
-    lines.extend([
-        "",
-        "## Final Metrics",
-        "",
-        "| algorithm | seed | FR | CV | HV | Pareto | best Rsum actual | saturated_link_ratio |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
-    ])
     for row in summaries:
         lines.append(
             f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('final_FR_after_repair', '')} | "
             f"{row.get('final_CV_after_repair', '')} | {row.get('final_HV', '')} | {row.get('pareto_count', '')} | "
-            f"{row.get('best_rsum_actual', '')} | {row.get('saturated_link_ratio', '')} |"
+            f"{row.get('best_rsum_capacity', '')} |"
         )
-    lines.extend([
-        "",
-        "## Gen0 Initial Population Comparison",
-        "",
-        "| algorithm | seed | FR before | CV before | FR after | CV after | best coverage | best rsum | pareto count | diversity |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ])
+    lines.extend(["", "## Gen0 Initial Population Comparison", "",
+        "| algorithm | seed | FR before | CV before | FR after | CV after | best coverage | best Rsum capacity | pareto count | diversity |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"])
     for row in gen0_rows:
         lines.append(
             f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('gen0_FR_before_repair', '')} | "
             f"{row.get('gen0_CV_before_repair', '')} | {row.get('gen0_FR_after_repair', '')} | "
             f"{row.get('gen0_CV_after_repair', '')} | {row.get('gen0_best_coverage', '')} | "
-            f"{row.get('gen0_best_rsum', '')} | {row.get('gen0_pareto_count', '')} | {row.get('gen0_diversity', '')} |"
+            f"{row.get('gen0_best_rsum_capacity', '')} | {row.get('gen0_pareto_count', '')} | {row.get('gen0_diversity', '')} |"
         )
-    lines.extend([
-        "",
-        "## DRL-Init Initial Population",
-        "",
-        "| seed | init FR | init CV | init diversity | accepted drl | heuristic | random |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
-    ])
-    for row in drl_rows:
-        lines.append(
-            f"| {row.get('seed', '')} | {row.get('init_FR_after_repair', '')} | {row.get('init_CV_after_repair', '')} | "
-            f"{row.get('init_diversity', '')} | {row.get('accepted_drl_count', '')} | "
-            f"{row.get('accepted_heuristic_count', '')} | {row.get('accepted_random_count', '')} |"
-        )
-    lines.extend([
-        "",
-        "## DQN Action and Reward Diagnostics",
-        "",
-        "| seed | mean reward | final epsilon | most used action | mean allowed actions | dominant pressure distribution |",
-        "|---:|---:|---:|---|---:|---|",
-    ])
+    lines.extend(["", "## DQN Action And Reward Diagnostics", "",
+        "| seed | mean reward | final epsilon | most used action | mean allowed actions |",
+        "|---:|---:|---:|---|---:|"])
     for row in dqn_rows:
         lines.append(
             f"| {row.get('seed', '')} | {row.get('mean_reward', '')} | {row.get('final_epsilon', '')} | "
-            f"{row.get('most_used_action', '')} | {row.get('mean_num_allowed_actions', '')} | "
-            f"{row.get('dominant_pressure_distribution', '')} |"
+            f"{row.get('most_used_action', '')} | {row.get('mean_num_allowed_actions', '')} |"
         )
-    lines.extend([
-        "",
-        "DQN-CR-MODE provides adaptive repair/search control under constraint pressure. In the current small scenario, its final objective advantage is seed-dependent, while DRL-Init-CR-MODE shows more stable improvement by improving the initial population quality.",
-    ])
-    status = "PASS" if not fallback and not incompatible and not saturated and not pareto_single else "REVIEW"
-    lines.extend([
-        "",
-        "## Validity Verdict",
-        "",
-        f"- Status: {status}",
-        f"- Rsum saturation concerns: {len(saturated)}",
-        f"- Pareto count <= 1 concerns: {len(pareto_single)}",
-    ])
+    status = "PASS" if not fallback and not incompatible and not pareto_single else "REVIEW"
+    lines.extend(["", "## Validity Verdict", "", f"- Status: {status}", f"- Pareto count <= 1 concerns: {len(pareto_single)}"] )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -759,85 +650,46 @@ def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None
     dqn_rows = dqn_rows or []
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lines = [
-        "# Final Experiment Summary",
-        "",
-        "## Configuration",
-        "",
+        "# Final Experiment Summary", "", "## Configuration", "",
         f"- Algorithms: {', '.join(str(row.get('algorithm')) for row in summaries if row.get('algorithm'))}",
         f"- Seeds: {', '.join(str(row.get('seed')) for row in summaries if row.get('seed') != '')}",
-        f"- use_data_rate_cap: {config.get('channel', {}).get('use_data_rate_cap', False)}",
-        f"- throughput_metric: {config.get('objectives', {}).get('throughput_metric', 'actual')}",
         f"- rsum_ref_min: {_drl_norm_value(config, 'rsum_ref_min', 0.0)}",
         f"- rsum_ref_max: {_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
-        f"- rsum_reward_normalization: {_rsum_reward_normalization_definition()}",
-        "",
-        "## Throughput Semantics",
-        "",
-        f"- Rsum actual: {_rsum_actual_definition(config)}",
-        "- Rsum capacity: Shannon theoretical aggregate link capacity before business data-rate capping.",
+        "", "## Throughput Semantics", "",
+        "- Rsum = rsum_capacity: theoretical channel capacity summed over valid sensor-AP links.",
         f"- PPO Rsum reward normalization: {_rsum_reward_normalization_definition()} min={_drl_norm_value(config, 'rsum_ref_min', 0.0)}, max={_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
-        "",
-        "## Checkpoint And Policy Source",
-        "",
-        "| seed | policy_source | torch_available | checkpoint_mode | checkpoint_compatible | checkpoint_path |",
-        "|---:|---|---|---|---|---|",
-    ]
-    for row in summaries:
-        if row.get("algorithm") == "drl_init_cr_mode":
-            lines.append(
-                f"| {row.get('seed', '')} | {row.get('policy_source', '')} | {row.get('torch_available', '')} | "
-                f"{row.get('checkpoint_mode', '')} | {row.get('checkpoint_compatible', '')} | {row.get('checkpoint_path', '')} |"
-            )
-    lines.extend([
-        "",
-        "## Gen0 Initial Population Comparison",
-        "",
-        "| algorithm | seed | FR after | CV after | best coverage | best rsum | pareto count | diversity |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
-    ])
+        "", "## Gen0 Initial Population Comparison", "",
+        "| algorithm | seed | FR after | CV after | best coverage | best Rsum capacity | pareto count | diversity |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|"]
     for row in gen0_rows:
         lines.append(
             f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('gen0_FR_after_repair', '')} | "
             f"{row.get('gen0_CV_after_repair', '')} | {row.get('gen0_best_coverage', '')} | "
-            f"{row.get('gen0_best_rsum', '')} | {row.get('gen0_pareto_count', '')} | {row.get('gen0_diversity', '')} |"
+            f"{row.get('gen0_best_rsum_capacity', '')} | {row.get('gen0_pareto_count', '')} | {row.get('gen0_diversity', '')} |"
         )
-    lines.extend([
-        "",
-        "## Final Metrics",
-        "",
-        "| algorithm | seed | FR | CV | HV | Pareto | best Rsum actual |",
-        "|---|---:|---:|---:|---:|---:|---:|",
-    ])
+    lines.extend(["", "## Final Metrics", "",
+        "| algorithm | seed | FR | CV | HV | Pareto | best Rsum capacity |",
+        "|---|---:|---:|---:|---:|---:|---:|"])
     for row in summaries:
         lines.append(
             f"| {row.get('algorithm', '')} | {row.get('seed', '')} | {row.get('final_FR_after_repair', '')} | "
-            f"{row.get('final_CV_after_repair', '')} | {row.get('final_HV', '')} | {row.get('pareto_count', '')} | {row.get('best_rsum_actual', '')} |"
+            f"{row.get('final_CV_after_repair', '')} | {row.get('final_HV', '')} | {row.get('pareto_count', '')} | "
+            f"{row.get('best_rsum_capacity', '')} |"
         )
-    lines.extend([
-        "",
-        "## DQN Action And Reward Diagnostics",
-        "",
+    lines.extend(["", "## DQN Action And Reward Diagnostics", "",
         "| seed | mean reward | final epsilon | most used action | mean allowed actions |",
-        "|---:|---:|---:|---|---:|",
-    ])
+        "|---:|---:|---:|---|---:|"])
     for row in dqn_rows:
         lines.append(
             f"| {row.get('seed', '')} | {row.get('mean_reward', '')} | {row.get('final_epsilon', '')} | "
             f"{row.get('most_used_action', '')} | {row.get('mean_num_allowed_actions', '')} |"
         )
-    lines.extend([
-        "",
-        "## Conclusion",
-        "",
-        "- CR-MODE is a feasible baseline in this scenario.",
-        "- DQN-CR-MODE provides adaptive repair/search control, but its final improvement is seed-dependent in the current small scenario.",
-        "- DRL-Init-CR-MODE shows the most stable improvement here by improving initial population quality.",
-        "- For formal paper claims, additional seeds or larger scenarios can further strengthen statistical evidence.",
-    ])
+    lines.extend(["", "## Conclusion", "", "- CR-MODE is the baseline multi-objective optimizer.",
+        "- DQN-CR-MODE adds adaptive search control under constraint pressure.",
+        "- DRL-Init-CR-MODE improves the starting population before CR-MODE optimization.",
+        "- All reported Rsum values in this experiment use rsum_capacity."])
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
-
-
 def _collect_reproducibility_evidence(config, command, start_time, end_time):
     import py_compile
     py_files = ["main.py", "src/rl_init/reward.py", "src/rl_init/population_generator.py", "src/rl_init/checkpoint.py", "src/rl_init/ppo_trainer.py", "src/rl_init/init_evaluator.py"]
@@ -898,7 +750,6 @@ def _run_validation_pytest_summary(config=None):
         "tests/test_rl_init_quality_score.py",
         "tests/test_rl_init_diversity_metrics.py",
         "tests/test_drl_init_training_log.py",
-        "tests/test_throughput_metric_switch.py",
         "tests/test_rl_init_checkpoint.py",
         "tests/test_rl_init_checkpoint_compatibility.py",
         "tests/test_drl_init_cr_mode_smoke.py",
@@ -933,18 +784,12 @@ def _rsum_reward_normalization_definition():
     return "interval normalization using rsum_ref_min and rsum_ref_max, clipped to [0, 1]"
 
 
-def _rsum_actual_definition(config):
-    if config.get("channel", {}).get("use_data_rate_cap", False):
-        return "Business-rate-capped aggregate throughput after applying channel.sensor_data_rate_bps."
-    return "Effective aggregate throughput in the current objective pipeline without business data-rate cap truncation; values may exceed active_sensors * sensor_data_rate_bps."
-
-
 def _feasible_metric_points(solutions, metadata_key):
     feasible = [s for s in solutions if s.feasible]
     if not feasible:
         return np.zeros((0, 2), dtype=float)
     return np.asarray([
-        [float(s.coverage), float(s.metadata.get(metadata_key, s.throughput))]
+        [float(s.coverage), float(s.metadata.get(metadata_key, s.rsum_capacity))]
         for s in feasible
     ], dtype=float)
 
@@ -1021,20 +866,21 @@ def _display_algorithm_name(algorithm):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment", default=None, help="Path to experiment YAML")
+    default_experiment = "configs/experiment_small_compare.yaml"
+    parser.add_argument(
+        "--experiment",
+        default=default_experiment,
+        help=f"Path to experiment YAML (default: {default_experiment})",
+    )
     parser.add_argument("--algorithm", default=None, help="Single algorithm override")
     args = parser.parse_args()
 
     project_root = os.path.dirname(os.path.abspath(__file__))
     os.chdir(project_root)
-    if args.experiment:
-        config = load_experiment_config(args.experiment)
-        if args.algorithm:
-            config.setdefault("experiment", {})["algorithms"] = [args.algorithm]
-        run_compare_experiment(config)
-    else:
-        config = load_config(os.path.join(project_root, "configs"))
-        run_experiment(config, args.algorithm or "cr_mode", "results")
+    config = load_experiment_config(args.experiment)
+    if args.algorithm:
+        config.setdefault("experiment", {})["algorithms"] = [args.algorithm]
+    run_compare_experiment(config)
 
 
 if __name__ == "__main__":

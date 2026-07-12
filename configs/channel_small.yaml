@@ -11,8 +11,4 @@ channel:
   p_tx_max: 0.15
   path_loss_alpha: 2.5
   snr_threshold: 14.0
-  use_data_rate_cap: false
-  sensor_data_rate_bps: 2000000.0
 
-objectives:
-  throughput_metric: actual

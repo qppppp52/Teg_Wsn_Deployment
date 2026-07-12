@@ -8,7 +8,7 @@ def save_pareto(solutions, path: str):
     """保存 feasible Pareto 解集为 npz，包含目标值和完整部署信息"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     feasible = [s for s in solutions if s.feasible]
-    objectives = np.array([[s.coverage, s.throughput] for s in feasible])
+    objectives = np.array([[s.coverage, s.rsum_capacity] for s in feasible])
 
     # 保存选中的部署信息
     K = len(feasible[0].x) if feasible else 0

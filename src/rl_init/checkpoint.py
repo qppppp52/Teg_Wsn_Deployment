@@ -14,7 +14,6 @@ from src.rl_init.ppo_policy import torch
 
 COMPATIBILITY_KEYS = [
     "scene_name",
-    "throughput_metric",
     "num_candidates",
     "candidate_feature_dim",
     "global_feature_dim",
@@ -55,18 +54,15 @@ def resolve_checkpoint_path(config: dict, seed: int | None = None) -> str:
     cfg = config.get("drl_init", config)
     mode = str(cfg.get("checkpoint_mode", "per_seed"))
     checkpoint_dir = cfg.get("checkpoint_dir", "experiments/checkpoints")
-    throughput_metric = config.get("objectives", {}).get("throughput_metric", "actual")
     values = {
         "scene_name": scene_name(config),
-        "throughput_metric": _slug(str(throughput_metric)),
         "seed": int(seed if seed is not None else cfg.get("seed", 42)),
     }
     if mode == "shared_pretrain":
-        template = cfg.get("checkpoint_name_template_shared", "drl_init_{scene_name}_{throughput_metric}_shared.pt")
+        template = cfg.get("checkpoint_name_template_shared", "drl_init_{scene_name}_capacity_shared.pt")
     else:
-        template = cfg.get("checkpoint_name_template", "drl_init_{scene_name}_{throughput_metric}_seed_{seed}.pt")
+        template = cfg.get("checkpoint_name_template", "drl_init_{scene_name}_capacity_seed_{seed}.pt")
     return os.path.join(checkpoint_dir, template.format(**values))
-
 
 def stable_config_hash(config: dict) -> str:
     cfg = config.get("drl_init", config)
@@ -77,7 +73,6 @@ def stable_config_hash(config: dict) -> str:
         "discretization": config.get("discretization", {}),
         "targets": config.get("targets", {}),
         "temperature": config.get("temperature", {}),
-        "throughput_metric": config.get("objectives", {}).get("throughput_metric", "actual"),
         "role_actions": cfg.get("role_actions", ["sensor", "ap", "skip", "stop"]),
         "max_selected_sensors": cfg.get("max_selected_sensors"),
         "max_selected_aps": cfg.get("max_selected_aps"),
@@ -108,7 +103,6 @@ def build_checkpoint_meta(agent, ctx, config: dict, checkpoint_mode: str | None 
         "scene_name": scene_name(config),
         "seed": int(cfg.get("seed", config.get("experiment", {}).get("seeds", [42])[0])),
         "checkpoint_mode": checkpoint_mode or cfg.get("checkpoint_mode", "per_seed"),
-        "throughput_metric": config.get("objectives", {}).get("throughput_metric", "actual"),
         "num_candidates": int(getattr(ctx, "num_candidates", 0)),
         "candidate_feature_dim": int(candidate_dim or net_cfg.get("candidate_feature_dim", 0) or 0),
         "global_feature_dim": int(global_dim or net_cfg.get("global_feature_dim", 0) or 0),

@@ -9,7 +9,7 @@ def objective_space_diversity(solutions):
     feasible = [s for s in solutions if getattr(s, "feasible", False)]
     if len(feasible) < 2:
         return 0.0
-    objs = np.array([[s.coverage, s.throughput] for s in feasible], dtype=float)
+    objs = np.array([[s.coverage, s.rsum_capacity] for s in feasible], dtype=float)
     lo = objs.min(axis=0)
     hi = objs.max(axis=0)
     norm = (objs - lo) / (hi - lo + 1e-12)

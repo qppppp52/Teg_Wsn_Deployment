@@ -32,8 +32,8 @@ def build_state(population, archive, ctx, prev_metrics=None, gen=0, max_generati
     pressure_mean = {k: float(np.mean([p[k] for p in pressures])) for k in pressures[0]}
     best_cov = max([s.coverage for s in feasible], default=0.0)
     mean_cov = float(np.mean([s.coverage for s in feasible])) if feasible else 0.0
-    best_rsum = max([s.throughput for s in feasible], default=0.0) / (rsum_ref_max + 1e-12)
-    mean_rsum = (float(np.mean([s.throughput for s in feasible])) / (rsum_ref_max + 1e-12)) if feasible else 0.0
+    best_rsum = max([float(s.metadata.get("rsum_capacity", s.rsum_capacity)) for s in feasible], default=0.0) / (rsum_ref_max + 1e-12)
+    mean_rsum = (float(np.mean([s.metadata.get("rsum_capacity", s.rsum_capacity) for s in feasible])) / (rsum_ref_max + 1e-12)) if feasible else 0.0
     repair_iters = np.array([getattr(s, "repair_iter", 0) for s in sols], dtype=float)
     repair_success = np.array([getattr(s, "repair_success", False) for s in sols], dtype=float)
 

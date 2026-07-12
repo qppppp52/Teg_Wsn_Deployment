@@ -7,7 +7,7 @@ class Individual:
         self.rho_s = np.random.rand(num_s)
         self.rho_a = np.random.rand(num_a)
         self.coverage = 0.0
-        self.throughput = 0.0
+        self.rsum_capacity = 0.0
         self.cv = float("inf")
         self.feasible = False
 
@@ -16,7 +16,7 @@ class Individual:
         new.rho_s = self.rho_s.copy()
         new.rho_a = self.rho_a.copy()
         new.coverage = self.coverage
-        new.throughput = self.throughput
+        new.rsum_capacity = self.rsum_capacity
         new.cv = self.cv
         new.feasible = self.feasible
         return new

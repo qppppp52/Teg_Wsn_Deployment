@@ -8,8 +8,8 @@ def select_better(trial_ind, trial_sol, target_ind, target_sol):
             return trial_ind, trial_sol, True
         return target_ind, target_sol, False
     if (trial_sol.coverage >= target_sol.coverage and
-        trial_sol.throughput >= target_sol.throughput and
+        trial_sol.rsum_capacity >= target_sol.rsum_capacity and
         (trial_sol.coverage > target_sol.coverage or
-         trial_sol.throughput > target_sol.throughput)):
+         trial_sol.rsum_capacity > target_sol.rsum_capacity)):
         return trial_ind, trial_sol, True
     return target_ind, target_sol, False

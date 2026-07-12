@@ -131,7 +131,6 @@ class DQNCRMode(BaseOptimizer):
                 "CV_after_repair": metrics["CV_mean"],
                 "HV": metrics["HV"],
                 "coverage_best": metrics["best_coverage"],
-                "rsum_actual_best": self.convergence_history["rsum_actual_best"][-1] if self.convergence_history["rsum_actual_best"] else 0.0,
                 "rsum_capacity_best": self.convergence_history["rsum_capacity_best"][-1] if self.convergence_history["rsum_capacity_best"] else 0.0,
                 "archive_size": len(self.archive),
                 "pareto_count": self.convergence_history["pareto_count"][-1] if self.convergence_history["pareto_count"] else 0,
@@ -152,8 +151,6 @@ class DQNCRMode(BaseOptimizer):
 
     def _record_convergence(self, gen):
         metrics = record_generation(self.convergence_history, self.population, self.archive, self.config)
-        if metrics.get("saturated_link_ratio", 0.0) > 0.9:
-            logger.warning("Throughput actual is saturated; Pareto front may degenerate.")
 
     def _metrics(self):
         sols = self.population.solutions
@@ -169,7 +166,7 @@ class DQNCRMode(BaseOptimizer):
             "FR": len(feasible) / len(sols) if sols else 0.0,
             "HV": self.convergence_history["HV"][-1] if self.convergence_history["HV"] else 0.0,
             "best_coverage": max([s.coverage for s in feasible], default=0.0),
-            "best_rsum_norm": max([s.throughput for s in feasible], default=0.0) / (rmax + 1e-12),
+            "best_rsum_norm": max([float(s.metadata.get("rsum_capacity", s.rsum_capacity)) for s in feasible], default=0.0) / (rmax + 1e-12),
             "diversity": objective_space_diversity(sols),
             "pressure": pressure,
             "mean_repair_iter": float(np.mean([getattr(s, "repair_iter", 0) for s in sols])) if sols else 0.0,
@@ -203,6 +200,6 @@ class _EmptyPopulation:
 
 def _copy_solution_metrics(individual, solution):
     individual.coverage = solution.coverage
-    individual.throughput = solution.throughput
+    individual.rsum_capacity = solution.rsum_capacity
     individual.cv = solution.cv
     individual.feasible = solution.feasible

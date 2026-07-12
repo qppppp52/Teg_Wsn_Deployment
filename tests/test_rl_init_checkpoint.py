@@ -18,11 +18,9 @@ class TinyAgent:
 def test_checkpoint_path_uses_per_seed_template():
     cfg = {
         "experiment": {"name": "small_center_heat_compare"},
-        "objectives": {"throughput_metric": "actual"},
         "drl_init": {
             "checkpoint_mode": "per_seed",
             "checkpoint_dir": "experiments/checkpoints",
-            "checkpoint_name_template": "drl_init_{scene_name}_{throughput_metric}_seed_{seed}.pt",
             "seed": 43,
         },
     }
@@ -36,7 +34,6 @@ def test_save_and_load_checkpoint_with_meta():
     meta = {
         "scene_name": "small_center_heat_compare",
         "seed": 42,
-        "throughput_metric": "actual",
         "num_candidates": 5,
         "candidate_feature_dim": 3,
         "global_feature_dim": 4,
