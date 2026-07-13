@@ -403,20 +403,32 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         init_metrics = getattr(algo, "init_metrics", [])
         init_cvs = [float(row["cv"]) for row in init_metrics]
         init_feasible = [bool(row["feasible"]) for row in init_metrics]
-        finite_diversity = [float(row.get("diversity_score", 0.0)) for row in init_metrics if np.isfinite(float(row.get("diversity_score", 0.0)))]
+        finite_diversity = [
+            float(row["diversity_score"])
+            for row in init_metrics
+            if row.get("diversity_score") is not None
+            and np.isfinite(float(row["diversity_score"]))
+        ]
         accepted = getattr(algo, "accepted_counts", {}) or {}
         drl_training_time = float(getattr(algo, "init_train_seconds", 0.0))
         generation_time = float(getattr(algo, "init_generation_seconds", 0.0))
         checkpoint_load_time = float(getattr(algo, "checkpoint_load_seconds", 0.0))
         pretrain_time = float(getattr(algo, "pretrain_seconds", 0.0))
-        online_optimization_time = max(float(runtime_seconds) - drl_training_time - checkpoint_load_time - generation_time, 0.0)
+        online_optimization_time = float(
+            getattr(algo, "online_optimization_seconds", 0.0)
+        )
+        drl_init_summary = dict(getattr(algo, "drl_init_summary", {}) or {})
+        cost = dict(drl_init_summary.get("cost", {}) or {})
         summary.update({
             "drl_training_time": drl_training_time,
             "online_optimization_time": online_optimization_time,
-            "total_time": float(runtime_seconds),
+            "total_time": float(getattr(algo, "total_end_to_end_seconds", runtime_seconds)),
             "generation_time": generation_time,
             "init_generation_time": generation_time,
             "pretrain_time_seconds": pretrain_time,
+            "population_generation_seconds": generation_time,
+            "gen0_evaluation_seconds": float(getattr(algo, "gen0_evaluation_seconds", 0.0)),
+            "cr_mode_search_seconds": float(getattr(algo, "cr_mode_search_seconds", 0.0)),
             "checkpoint_load_time_seconds": checkpoint_load_time,
             "loaded_checkpoint": bool(getattr(algo, "loaded_checkpoint", False)),
             "policy_source": getattr(algo, "policy_source", ""),
@@ -442,6 +454,21 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
             "drl_train_episodes": int(config.get("drl_init", {}).get("train_episodes", 0)),
             "drl_init_train_seconds": drl_training_time,
             "init_policy_path": getattr(algo, "init_policy_path", None) or "",
+            "DRL_INIT_VALID": bool(getattr(algo, "drl_init_valid", False)),
+            "DRL_INIT_INVALID_REASONS": list(getattr(algo, "drl_init_invalid_reasons", [])),
+            "checkpoint_load_attempted": bool(drl_init_summary.get("checkpoint_load_attempted", False)),
+            "checkpoint_loaded": bool(drl_init_summary.get("checkpoint_loaded", False)),
+            "loaded_checkpoint_compatible": bool(drl_init_summary.get("loaded_checkpoint_compatible", False)),
+            "checkpoint_load_skip_reason": drl_init_summary.get("checkpoint_load_skip_reason", ""),
+            "new_checkpoint_saved": bool(drl_init_summary.get("new_checkpoint_saved", False)),
+            "new_checkpoint_path": drl_init_summary.get("new_checkpoint_path", ""),
+            "online_evaluation_count": int(cost.get("online_evaluation_count", getattr(algo, "evaluation_count", 0))),
+            "total_end_to_end_evaluations": int(cost.get("total_end_to_end_evaluations", getattr(algo, "evaluation_count", 0))),
+            "source_wise": drl_init_summary.get("source_wise", {}),
+            "source_differences": drl_init_summary.get("source_differences", {}),
+            "ppo_training": drl_init_summary.get("ppo_training", {}),
+            "cost": cost,
+            "drl_init": drl_init_summary,
         })
     return summary
 
@@ -596,6 +623,10 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     drl_rows = [row for row in summaries if row.get("algorithm") == "drl_init_cr_mode"]
     fallback = [row for row in drl_rows if row.get("policy_source") == "fallback" or str(row.get("torch_available", "")).lower() == "false"]
+    invalid_drl = [
+        row for row in drl_rows
+        if str(row.get("DRL_INIT_VALID", "")).lower() != "true"
+    ]
     incompatible = [row for row in drl_rows if str(row.get("checkpoint_compatible", "")).lower() == "false"]
     pareto_single = [row for row in summaries if int(row.get("pareto_count", 0) or 0) <= 1]
     evidence = _collect_reproducibility_evidence(config, command, start_time, end_time)
@@ -615,6 +646,7 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         f"- Rsum reward normalization: {_rsum_reward_normalization_definition()}",
         "", "## Environment Checks", "",
         f"- DRL-Init runs: {len(drl_rows)}", f"- Fallback runs: {len(fallback)}",
+        f"- Invalid formal DRL-Init runs: {len(invalid_drl)}",
         f"- Incompatible checkpoint runs: {len(incompatible)}", "",
         "## Final Metrics", "",
         "| algorithm | seed | FR | CV | HV | Pareto | best Rsum capacity |",

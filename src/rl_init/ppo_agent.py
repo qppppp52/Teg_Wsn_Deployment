@@ -37,6 +37,11 @@ class PPOAgent:
         with torch.no_grad():
             action, log_prob, value, entropy = self.policy.act(state, deterministic=deterministic)
         return action, float(log_prob.item()), float(value.item()), float(entropy.item())
+    def value(self, state) -> float:
+        """Return the critic bootstrap value without creating an autograd graph."""
+        with torch.no_grad():
+            output = self.policy(state)
+        return float(output["value"].reshape(-1)[0].item())
 
     def update(self, buffer: RolloutBuffer):
         if len(buffer) == 0:

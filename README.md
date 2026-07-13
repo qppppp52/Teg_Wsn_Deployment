@@ -16,6 +16,12 @@ This project includes a small reproducible validation scenario for comparing CR-
 - Every evolutionary generation evaluates exactly one trial per population member and records the cumulative evaluation count.
 - DQN training artifacts are written to `experiments/dqn_training`; the best checkpoint is written to `experiments/checkpoints`.
 - `main.py` runs DQN inference only, so DQN training time is not mixed into the online optimization runtime comparison.
+- DRL-Init-CR-MODE uses a per-seed PPO policy only to generate Gen0; generations 1-60 use the same CR-MODE search core as the baseline.
+- PPO setup/training, population generation, Gen0 evaluation, and CR-MODE search times are reported separately.
+- Formal DRL-Init runs require PyTorch, a trained or compatible loaded PPO policy, and enough accepted DRL individuals; invalid runs fail instead of silently becoming heuristic/random results.
+- `drl_init_summary.json` records source-wise DRL/heuristic/random quality, actual evaluation counts, fallback reasons, PPO update evidence, and checkpoint load/save status.
+- Per-seed PPO uses information from that seed's scenario and must not be described as unseen-seed generalization.
+- A separate `shared_pretrain` study would be required for frozen PPO generalization; this project keeps the current per-seed initialization research design.
 - Main outputs: `experiments/small_center_heat_compare/<timestamp>/scene_preprocess/shared` for scene preprocessing, plus `<algorithm>/seed_<seed>/data`, `figures`, and `pareto` for algorithm results.
 - Recommended Pareto solution: selected by normalized distance to the ideal point using Coverage and normalized Rsum.
 

@@ -10,7 +10,7 @@ from src.rl_init.state_builder import build_init_state
 
 
 class InitDeploymentEnv:
-    def __init__(self, ctx, config):
+    def __init__(self, ctx, config, evaluation_counter=None, terminal_counter_key=None):
         self.ctx = ctx
         self.config = config
         self.cfg = config.get("drl_init", config)
@@ -26,6 +26,8 @@ class InitDeploymentEnv:
         self.invalid_action_count = 0
         self.step_reward_sum = 0.0
         self._last_summary = {}
+        self.evaluation_counter = evaluation_counter
+        self.terminal_counter_key = terminal_counter_key
 
     def reset(self, seed=None) -> dict:
         if seed is not None:
@@ -73,6 +75,8 @@ class InitDeploymentEnv:
         reward = compute_step_reward(prev_summary, new_summary, info, self.cfg.get("reward", {}))
         self.step_reward_sum += float(reward)
         if self.done:
+            if self.evaluation_counter is not None and self.terminal_counter_key:
+                self.evaluation_counter.increment(self.terminal_counter_key)
             terminal_reward, metrics = compute_terminal_reward(self, self.cfg.get("reward", {}), self.cfg.get("normalization", {}))
             self.last_eval_metrics = {k: v for k, v in metrics.items() if k != "solution"}
             terminal_info = dict(self.last_eval_metrics)
