@@ -2,7 +2,7 @@ import numpy as np
 from src.model.individual import Individual
 
 
-def mutate(individual, F, strategy="standard_rand", population=None, idx=None, ctx=None):
+def mutate(individual, F, strategy="standard_rand", population=None, idx=None, ctx=None, guide=None):
     if population is None or len(population) < 3:
         return individual.copy()
     strategy = _alias_strategy(strategy)
@@ -19,12 +19,14 @@ def mutate(individual, F, strategy="standard_rand", population=None, idx=None, c
         if strategy == "standard_rand":
             m.rho_s = X1.rho_s + F*(X2.rho_s - X3.rho_s)
             m.rho_a = X1.rho_a + F*(X2.rho_a - X3.rho_a)
-        elif strategy in {"coverage_guided", "throughput_guided", "best_1", "current_to_best_1"}:
-            key = (lambda s: getattr(s, "rsum_capacity", 0.0)) if strategy == "throughput_guided" else _score
-            best = _get_best(population, key)
-            base = X1 if strategy == "best_1" else individual
-            m.rho_s = base.rho_s + F*(best.rho_s - base.rho_s) + F*(X2.rho_s - X3.rho_s)
-            m.rho_a = base.rho_a + F*(best.rho_a - base.rho_a) + F*(X2.rho_a - X3.rho_a)
+        elif strategy in {"coverage_guided", "rsum_capacity_guided", "best_1", "current_to_best_1"}:
+            selected_guide = guide or select_pareto_guide(population)
+            if strategy == "best_1":
+                m.rho_s = selected_guide.rho_s + F*(X1.rho_s - X2.rho_s)
+                m.rho_a = selected_guide.rho_a + F*(X1.rho_a - X2.rho_a)
+            else:
+                m.rho_s = individual.rho_s + F*(selected_guide.rho_s - individual.rho_s) + F*(X1.rho_s - X2.rho_s)
+                m.rho_a = individual.rho_a + F*(selected_guide.rho_a - individual.rho_a) + F*(X1.rho_a - X2.rho_a)
         else:
             m.rho_s = X1.rho_s + F*(X2.rho_s - X3.rho_s)
             m.rho_a = X1.rho_a + F*(X2.rho_a - X3.rho_a)
@@ -50,9 +52,33 @@ def _select_many(cur, sz, n):
     return np.random.choice(cand, n, replace=replace)
 
 
-def _get_best(pop, key):
-    return max(pop, key=key)
+def select_pareto_guide(population):
+    """Sample a guide from the current constrained Pareto leading front."""
+    if not population:
+        raise ValueError("population must not be empty")
+    feasible = [individual for individual in population if getattr(individual, "feasible", False)]
+    candidates = feasible or list(population)
+    if not feasible:
+        best_cv = min(float(getattr(individual, "cv", np.inf)) for individual in candidates)
+        candidates = [
+            individual for individual in candidates
+            if abs(float(getattr(individual, "cv", np.inf)) - best_cv) <= 1.0e-12
+        ]
+    else:
+        candidates = [
+            candidate for candidate in candidates
+            if not any(
+                _objective_dominates(other, candidate)
+                for other in candidates
+                if other is not candidate
+            )
+        ]
+    return candidates[int(np.random.randint(len(candidates)))]
 
 
-def _score(ind):
-    return getattr(ind, "coverage", 0.0) + getattr(ind, "rsum_capacity", 0.0) / 1e9
+def _objective_dominates(a, b):
+    return (
+        a.coverage >= b.coverage
+        and a.rsum_capacity >= b.rsum_capacity
+        and (a.coverage > b.coverage or a.rsum_capacity > b.rsum_capacity)
+    )

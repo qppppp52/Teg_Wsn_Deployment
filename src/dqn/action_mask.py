@@ -18,7 +18,8 @@ def build_dqn_action_mask(state_metrics: dict, actions: list, config: dict) -> n
         return mask
 
     dcfg = config.get("dqn", {}) if isinstance(config, dict) else {}
-    if not dcfg.get("action_mask_enabled", True):
+    action_mask_cfg = dcfg.get("action_mask", {})
+    if not action_mask_cfg.get("enabled", dcfg.get("action_mask_enabled", True)):
         return mask
 
     fr = _metric(state_metrics, "FR_after_repair", "FR", "feasible_ratio", default=0.0)
@@ -27,7 +28,7 @@ def build_dqn_action_mask(state_metrics: dict, actions: list, config: dict) -> n
     hv_stall = int(_metric(state_metrics, "hv_stall_generations", "HV_stall", default=0))
     pressure = pressure_values(state_metrics)
 
-    thresholds = dcfg.get("mask", {})
+    thresholds = action_mask_cfg.get("thresholds", dcfg.get("mask", {}))
     low_fr = float(thresholds.get("low_fr", 0.2))
     feasible_fr = float(thresholds.get("feasible_fr", 0.8))
     low_cv = float(thresholds.get("low_cv", 1.0e-3))
@@ -41,19 +42,19 @@ def build_dqn_action_mask(state_metrics: dict, actions: list, config: dict) -> n
 
     if fr < low_fr:
         mask = _allow_only(names, {
-            "balanced", "energy_first", "link_first", "capacity_first", "sink_first", "conservative_repair",
+            "balanced", "energy_first", "link_first", "ap_load_first", "sink_first", "conservative_repair",
         })
     elif dominant == "energy" and dominant_value > high_pressure:
         mask = _allow_only(names, {"balanced", "energy_first", "conservative_repair", "sink_first"})
     elif dominant == "link" and dominant_value > high_pressure:
-        mask = _allow_only(names, {"balanced", "link_first", "capacity_first", "throughput_priority"})
+        mask = _allow_only(names, {"balanced", "link_first", "ap_load_first", "rsum_capacity_priority"})
     elif dominant == "capacity" and dominant_value > high_pressure:
-        mask = _allow_only(names, {"balanced", "capacity_first", "link_first", "conservative_repair"})
+        mask = _allow_only(names, {"balanced", "ap_load_first", "link_first", "conservative_repair"})
     elif dominant == "sink" and dominant_value > high_pressure:
         mask = _allow_only(names, {"balanced", "sink_first", "energy_first", "conservative_repair"})
 
     if fr >= feasible_fr and cv <= low_cv:
-        _enable(mask, names, "throughput_priority", "exploration_high_F", "diversity_boost", "exploitation_low_F")
+        _enable(mask, names, "rsum_capacity_priority", "exploration_high_F", "diversity_boost", "exploitation_low_F")
 
     if hv_stall >= stall_generations or abs(delta_hv) <= small_delta_hv:
         _enable(mask, names, "diversity_boost", "exploration_high_F")

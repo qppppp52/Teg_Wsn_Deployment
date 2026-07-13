@@ -50,8 +50,8 @@ def repair_power(solution, ctx):
         elif strategy == "conservative":
             solution.p_tx[si, aj] = ptx_min
         else:
-            # energy_balanced 或 throughput_priority：在能量允许范围内提升功率
-            if strategy == "throughput_priority":
+            # energy_balanced 或 rsum_capacity_priority：在能量允许范围内提升功率
+            if strategy == "rsum_capacity_priority":
                 eta = 0.8
             else:
                 eta = 0.5

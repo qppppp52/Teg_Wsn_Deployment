@@ -68,7 +68,7 @@ def record_generation(history: dict, population, archive, config: dict) -> dict:
         "min_link_capacity_bps": _min_positive([s.metadata.get("min_link_capacity_bps", 0.0) for s in sols]),
         "max_link_capacity_bps": max([s.metadata.get("max_link_capacity_bps", 0.0) for s in sols], default=0.0),
         "archive_size": len(archive),
-        "pareto_count": len(feasible),
+        "pareto_count": len(fe_objs),
         "diversity": objective_space_diversity(feasible),
     }
     for key, value in metric.items():

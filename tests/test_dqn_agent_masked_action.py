@@ -3,20 +3,13 @@ import pytest
 
 from src.dqn.action_space import ACTIONS
 
+from tests.dqn_test_config import make_dqn_config
 
 def test_masked_actions_are_not_selected_random_or_greedy():
     torch = pytest.importorskip("torch")
     from src.dqn.dqn_agent import DQNAgent
 
-    cfg = {
-        "dqn": {
-            "hidden_dims": [8],
-            "epsilon_start": 1.0,
-            "epsilon_end": 1.0,
-            "batch_size": 2,
-            "min_replay_size": 2,
-        }
-    }
+    cfg = make_dqn_config(hidden_dims=(8,), batch_size=2, epsilon=(1.0, 1.0))
     agent = DQNAgent(4, len(ACTIONS), cfg)
     state = np.zeros(4, dtype=np.float32)
     mask = np.zeros(len(ACTIONS), dtype=bool)
@@ -38,7 +31,7 @@ def test_q_stats_respects_action_mask():
     torch = pytest.importorskip("torch")
     from src.dqn.dqn_agent import DQNAgent
 
-    cfg = {"dqn": {"hidden_dims": [8], "epsilon_start": 0.0, "epsilon_end": 0.0}}
+    cfg = make_dqn_config(hidden_dims=(8,), epsilon=(0.0, 0.0))
     agent = DQNAgent(4, len(ACTIONS), cfg)
     state = np.zeros(4, dtype=np.float32)
     mask = np.zeros(len(ACTIONS), dtype=bool)

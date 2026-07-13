@@ -1,15 +1,16 @@
 import numpy as np
+import os
+
 from src.optimizers.base_optimizer import BaseOptimizer
 from src.model.population import Population
 from src.model.pareto_archive import ParetoArchive
 from src.operators.strategy_controller import StrategyController
-from src.operators.mode_mutation import mutate
-from src.operators.mode_crossover import crossover
-from src.operators.mode_selection import select_better
 from src.evaluator.individual_evaluator import evaluate_individual
 from src.utils.logger import get_logger
 from src.evaluation.generation_diagnostics import make_convergence_history, record_generation
+from src.optimizers.generation_executor import GenerationExecutor, copy_solution_metrics
 
+from src.io.population_snapshot import load_population_snapshot, save_population_snapshot
 logger = get_logger("CR-MODE")
 
 
@@ -23,11 +24,22 @@ class CRMode(BaseOptimizer):
         self.archive = ParetoArchive(mc.get("archive_max_size", 200))
         self.population = None
         self.convergence_history = make_convergence_history()
+        self.executor = GenerationExecutor(ctx, self.NP)
+        self.evaluation_count = 0
 
     def initialize_population(self):
         im = self.ctx.index_mapping
+        snapshot = self.config.get("runtime", {}).get("initial_population_snapshot")
+        if snapshot and os.path.isfile(snapshot):
+            population, _ = load_population_snapshot(
+                snapshot, self.NP, im.num_sensor_candidates, im.num_ap_candidates
+            )
+            return population
         population = Population(self.NP, im.num_sensor_candidates, im.num_ap_candidates)
         population.initialize(self.ctx, strategy=self.config.get("mode", {}).get("initialization", "mixed"))
+        if snapshot:
+            seed = self.config.get("experiment", {}).get("seeds", [0])[0]
+            save_population_snapshot(population, snapshot, seed)
         return population
 
     def evaluate_population(self):
@@ -37,8 +49,9 @@ class CRMode(BaseOptimizer):
             if rep_ind is not None:
                 ind = rep_ind
                 self.population.individuals[idx] = ind
-            _copy_solution_metrics(ind, sol)
+            copy_solution_metrics(ind, sol)
             solutions.append(sol)
+            self.evaluation_count += 1
         self.population.solutions = solutions
 
     def run(self):
@@ -46,43 +59,35 @@ class CRMode(BaseOptimizer):
         self.evaluate_population()
         self.archive.update(self.population.solutions)
         self._record_convergence(0)
-        for gen in range(self.Tmax):
-            new_inds, new_sols = [], []
-            for i, ind in enumerate(self.population.individuals):
-                mutant = mutate(ind, self.strategy.F,
-                                self.strategy.mutation_strategy,
-                                self.population.individuals, i, self.ctx)
-                trial = crossover(ind, mutant, self.strategy.crossover_rate)
-                trial_sol, rep_ind = evaluate_individual(trial, self.ctx)
-                if rep_ind is not None:
-                    trial = rep_ind
-                winner, winner_sol, _ = select_better(
-                    trial, trial_sol, ind, self.population.solutions[i])
-                _copy_solution_metrics(winner, winner_sol)
-                new_inds.append(winner)
-                new_sols.append(winner_sol)
-            self.population.individuals = new_inds
-            self.population.solutions = new_sols
-            self.archive.update(new_sols)
-            self._record_convergence(gen + 1)
-            if gen % 10 == 0 or gen == self.Tmax - 1:
-                stats = self.population.get_statistics()
-                cov_str = f"{stats['Coverage_avg_feasible']:.3f}" if not (isinstance(stats['Coverage_avg_feasible'], float) and np.isnan(stats['Coverage_avg_feasible'])) else "NaN"
-                rsum_str = f"{stats['Rsum_avg_feasible']:.1f}" if not (isinstance(stats['Rsum_avg_feasible'], float) and np.isnan(stats['Rsum_avg_feasible'])) else "NaN"
-                logger.info(
-                    f"Gen {gen:4d} | FR={stats['FR']:.3f} "
-                    f"CV={stats['CV_avg']:.4f} "
-                    f"Cov={cov_str} "
-                    f"Rsum={rsum_str} "
-                    f"Archive={len(self.archive)}")
+        self._log_generation(0)
+
+        action = {
+            "F": self.strategy.F,
+            "CR": self.strategy.crossover_rate,
+            "mutation_strategy": self.strategy.mutation_strategy,
+            "repair_strategy": None,
+        }
+        for generation in range(1, self.Tmax + 1):
+            result = self.executor.execute(self.population, action)
+            self.population = result.population
+            self.evaluation_count += result.evaluations
+            self.archive.update(result.trial_solutions)
+            self._record_convergence(generation)
+            if generation % 10 == 0 or generation == self.Tmax:
+                self._log_generation(generation)
         return self.archive
 
     def _record_convergence(self, gen):
-        metrics = record_generation(self.convergence_history, self.population, self.archive, self.config)
+        record_generation(self.convergence_history, self.population, self.archive, self.config)
 
-
-def _copy_solution_metrics(individual, solution):
-    individual.coverage = solution.coverage
-    individual.rsum_capacity = solution.rsum_capacity
-    individual.cv = solution.cv
-    individual.feasible = solution.feasible
+    def _log_generation(self, generation):
+        stats = self.population.get_statistics()
+        cov = stats["Coverage_avg_feasible"]
+        rsum = stats["Rsum_avg_feasible"]
+        cov_str = f"{cov:.3f}" if not np.isnan(cov) else "NaN"
+        rsum_str = f"{rsum:.1f}" if not np.isnan(rsum) else "NaN"
+        logger.info(
+            f"Gen {generation:4d} | FR={stats['FR']:.3f} "
+            f"CV={stats['CV_avg']:.4f} Cov={cov_str} Rsum={rsum_str} "
+            f"Archive={len(self.archive)} Evals={self.evaluation_count}"
+        )

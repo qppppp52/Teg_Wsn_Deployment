@@ -17,8 +17,11 @@ def repair_loop(individual, ctx, max_iter=5, repair_strategy=None):
         sol.repair_success = True
         return sol, None
 
-    rep_ind = None
-    prev_cv = sol.cv
+    best_sol = sol.copy()
+    best_cv = float(sol.cv)
+    patience = int(ctx.config.get("constraints", {}).get("repair_patience", 2))
+    no_improvement = 0
+    seen = {_solution_signature(sol)}
     strategy_name = _strategy_get(repair_strategy, "name", None)
     repair_order = _strategy_get(repair_strategy, "repair_order", None)
     power_policy = _strategy_get(repair_strategy, "power_policy", None)
@@ -39,16 +42,27 @@ def repair_loop(individual, ctx, max_iter=5, repair_strategy=None):
         sol.repair_success = bool(sol.feasible)
         sol.repair_strategy = strategy_name
         sol.repair_order = list(repair_order or [])
+        tolerance = float(ctx.config.get("constraints", {}).get("cv_improvement_tol", 0.0))
+        if sol.feasible or sol.cv < best_cv - tolerance:
+            best_sol = sol.copy()
+            best_cv = float(sol.cv)
+            no_improvement = 0
+        else:
+            no_improvement += 1
         if sol.feasible:
-            if rep_ind is None and _deployment_changed(individual, sol, ctx):
-                rep_ind = _build_repaired_individual(individual, sol, ctx)
             break
-        if sol.cv >= prev_cv - float(ctx.config.get("constraints", {}).get("cv_improvement_tol", 0.0)):
+        signature = _solution_signature(sol)
+        if signature in seen or no_improvement >= patience:
             break
-        prev_cv = sol.cv
-    sol.cv_after_repair = sol.cv
-    sol.feasible_after_repair = bool(sol.feasible)
-    return sol, rep_ind
+        seen.add(signature)
+    best_sol.repair_iter = sol.repair_iter
+    best_sol.repair_success = bool(best_sol.feasible)
+    best_sol.repair_strategy = strategy_name
+    best_sol.repair_order = list(repair_order or [])
+    best_sol.cv_after_repair = best_sol.cv
+    best_sol.feasible_after_repair = bool(best_sol.feasible)
+    rep_ind = _build_repaired_individual(individual, best_sol, ctx) if _deployment_changed(individual, best_sol, ctx) else None
+    return best_sol, rep_ind
 
 
 def _strategy_get(strategy, key, default=None):
@@ -76,3 +90,14 @@ def _build_repaired_individual(ind, sol, ctx):
         new_ind.rho_a[la] = min(1.0, new_ind.rho_a[la]*1.2) if sol.y[gid] == 1 else max(0.0, new_ind.rho_a[la]*0.5)
     new_ind.clip()
     return new_ind
+
+
+def _solution_signature(sol):
+    return (
+        sol.x.tobytes(),
+        sol.y.tobytes(),
+        sol.c.tobytes(),
+        sol.p_tx.tobytes(),
+        sol.n_sink_sensor.tobytes(),
+        sol.n_sink_ap.tobytes(),
+    )

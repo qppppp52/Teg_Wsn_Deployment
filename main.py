@@ -35,7 +35,7 @@ logger = get_logger("main")
 BASE_SUMMARY_FIELDS = [
     "algorithm", "seed", "final_FR_after_repair", "final_CV_after_repair",
     "final_HV", "archive_size", "pareto_count", "best_coverage",
-    "first_feasible_generation", "mean_repair_iter", "repair_success_rate",
+    "first_feasible_generation", "mean_repair_iter", "repair_success_rate", "evaluation_count",
     "final_FR", "final_CV_mean", "best_rsum_capacity", "recommended_rsum_capacity",
     "rsum_capacity_best",
     "rsum_ref_min", "rsum_ref_max", "rsum_reward_normalization",
@@ -111,7 +111,7 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None,
     config.setdefault("experiment", {})["seeds"] = [seed]
     config.setdefault("drl_init", {})["seed"] = seed
     config.setdefault("runtime", {})["output_dir"] = output_dir
-    set_seed(seed)
+    set_seed(seed, include_torch=algorithm == "dqn_cr_mode")
     logger.info(f"Seed={seed}, algorithm={algorithm}")
 
     data_dir = os.path.join(output_dir, "data")
@@ -186,6 +186,9 @@ def run_compare_experiment(config):
     for algorithm in algorithms:
         for seed in seeds:
             out_dir = os.path.join(root, algorithm, f"seed_{seed}")
+            config.setdefault("runtime", {})["initial_population_snapshot"] = os.path.join(
+                root, "initial_population", f"seed_{seed}.npz"
+            )
             preprocess_dir = os.path.join(root, "scene_preprocess", "shared")
             save_preprocess = algorithm == algorithms[0] and seed == seeds[0]
             archive, summary, history = run_experiment(
@@ -376,6 +379,8 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         "repair_success_rate": history.get("repair_success_rate", [0.0])[-1] if history else 0.0,
         "runtime_seconds": runtime_seconds,
         "final_FR": history.get("FR_current", [0.0])[-1] if history else 0.0,
+        "evaluation_count": int(getattr(algo, "evaluation_count", 0)),
+        "initial_population_snapshot": config.get("runtime", {}).get("initial_population_snapshot", ""),
         "final_CV_mean": history.get("CV_mean", [float("nan")])[-1] if history else float("nan"),
         "rsum_capacity_best": best_capacity,
         "rsum_capacity_definition": "Aggregate theoretical Shannon link capacity over valid sensor-AP connections.",
@@ -391,6 +396,7 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
             "mean_reward": float(np.mean(rewards)) if rewards else 0.0,
             "last_epsilon": float(training_log[-1].get("epsilon", float("nan"))) if training_log else float("nan"),
             "most_used_action": max(set(actions), key=actions.count) if actions else "",
+            "dqn_execution_mode": getattr(algo, "execution_mode", ""),
             "dqn_model_path": getattr(algo, "model_path", None) or "",
         })
     if algorithm == "drl_init_cr_mode":
@@ -777,6 +783,8 @@ def _run_text_command(cmd):
 
 
 def _drl_norm_value(config, key, default):
+    if key in config.get("evaluation", {}):
+        return config["evaluation"][key]
     return config.get("drl_init", {}).get("normalization", {}).get(key, default)
 
 

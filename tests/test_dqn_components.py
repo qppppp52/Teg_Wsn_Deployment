@@ -7,6 +7,7 @@ from src.dqn.action_space import ACTIONS
 from src.dqn.replay_buffer import ReplayBuffer
 from src.dqn.state_builder import build_state
 
+from tests.dqn_test_config import make_dqn_config
 
 def _writable_test_dir():
     candidates = [
@@ -61,7 +62,7 @@ def test_q_network_forward_and_agent_checkpoint():
     y = net(x)
     assert tuple(y.shape) == (2, len(ACTIONS))
 
-    cfg = {"dqn": {"hidden_dims": [16, 16], "batch_size": 2, "min_replay_size": 2}}
+    cfg = make_dqn_config(hidden_dims=(16, 16), batch_size=2)
     agent = DQNAgent(19, len(ACTIONS), cfg)
     ckpt = _writable_test_dir() / f"dqn_{uuid.uuid4().hex}.pt"
     agent.save(str(ckpt))

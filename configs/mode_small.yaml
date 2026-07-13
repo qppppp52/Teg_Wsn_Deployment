@@ -15,5 +15,5 @@ mode:
 
 evaluation:
   rsum_ref_min: 0.0
-  rsum_ref_max: 2.0e7
+  rsum_ref_max: 2.0e8
   hv_reference: [0.0, 0.0]

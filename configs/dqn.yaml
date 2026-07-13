@@ -1,21 +1,44 @@
 dqn:
   enabled: true
-  state_dim: auto
-  action_dim: auto
-  hidden_dims: [128, 128]
-  gamma: 0.95
-  lr: 0.001
-  batch_size: 64
-  replay_capacity: 5000
-  min_replay_size: 200
-  target_update_interval: 10
-  epsilon_start: 1.0
-  epsilon_end: 0.05
-  epsilon_decay_generations: 80
-  train_every: 1
-  reward_clip: [-1.0, 1.0]
-  save_model: true
-  use_double_dqn: true
-  grad_clip_norm: 5.0
-  reward_normalization: true
-  action_mask_enabled: true
+  mode: eval
+  checkpoint_path: experiments/checkpoints/dqn_cr_mode_small_center_heat_best.pt
+  network:
+    hidden_dims: [128, 128]
+  optimizer:
+    learning_rate: 0.001
+    gamma: 0.95
+    batch_size: 32
+    grad_clip_norm: 5.0
+  replay:
+    capacity: 20000
+    min_size: 64
+  target_update:
+    interval: 100
+  exploration:
+    epsilon_start: 1.0
+    epsilon_end: 0.05
+    decay_steps: 6000
+  training:
+    updates_per_step: 1
+    episodes: 120
+    validation_interval: 5
+    validation_patience: 20
+  reward:
+    clip: [-1.0, 1.0]
+    normalize: true
+    warmup_steps: 64
+  state_normalization:
+    enabled: true
+    warmup_steps: 64
+    clip: 5.0
+  action_mask:
+    enabled: true
+    thresholds:
+      low_fr: 0.2
+      feasible_fr: 0.8
+      low_cv: 0.001
+      high_pressure: 0.4
+      hv_stall_generations: 5
+      small_delta_hv: 0.00001
+  checkpoint:
+    save_model: true

@@ -42,27 +42,28 @@ def repair_solution_with_strategy(
     if strategy_name is not None:
         solution.metadata["repair_strategy"] = strategy_name
 
-    for step in order:
-        step_key = _normalize_step(step)
-        if step_key == "deploy":
-            repair_deployment(solution, ctx)
-        elif step_key == "link":
-            repair_link_constraints(solution, ctx)
-        elif step_key == "capacity":
-            repair_capacity(solution, ctx)
-        elif step_key == "energy":
-            repair_energy_constraints(solution, ctx)
-        elif step_key == "service":
-            repair_empty_aps(solution, ctx)
-        elif step_key == "sink":
-            allocate_all_sinks(solution, ctx)
-        else:
-            raise ValueError(f"Unknown repair step: {step}")
-
-    if previous_policy is None and hasattr(ctx, "current_power_policy"):
-        delattr(ctx, "current_power_policy")
-    elif previous_policy is not None:
-        ctx.current_power_policy = previous_policy
+    try:
+        for step in order:
+            step_key = _normalize_step(step)
+            if step_key == "deploy":
+                repair_deployment(solution, ctx)
+            elif step_key == "link":
+                repair_link_constraints(solution, ctx)
+            elif step_key == "capacity":
+                repair_capacity(solution, ctx)
+            elif step_key == "energy":
+                repair_energy_constraints(solution, ctx)
+            elif step_key == "service":
+                repair_empty_aps(solution, ctx)
+            elif step_key == "sink":
+                allocate_all_sinks(solution, ctx)
+            else:
+                raise ValueError(f"Unknown repair step: {step}")
+    finally:
+        if previous_policy is None and hasattr(ctx, "current_power_policy"):
+            delattr(ctx, "current_power_policy")
+        elif previous_policy is not None:
+            ctx.current_power_policy = previous_policy
     return solution
 
 

@@ -55,6 +55,7 @@ results/
 *.lprof
 
 
+.test_outputs/
 # Experiment batch outputs
 experiments/
 # Local test-generated experiment outputs
