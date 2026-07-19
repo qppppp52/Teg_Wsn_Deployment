@@ -26,7 +26,6 @@ heatsink:
   allow_sink_outside_neighborhood: false
   allow_sink_sink_overlap: false
   count_self_grid_as_sink: true
-  default_allocation_strategy: balanced
 
 constraints:
   feasible_tol: 1.0e-8
@@ -42,13 +41,6 @@ constraints:
     service: 0.1
   early_stop_if_cv_not_decrease: true
   max_repair_iter: 5
-  repair_order_default:
-    - deployment
-    - link
-    - power
-    - energy
-    - heatsink
-    - ap_service
   cv_pressure_refs:
     deploy: 1.0
     link: 10.0
@@ -58,3 +50,6 @@ constraints:
     service: 5.0
     total: 20.0
 
+throughput_enhancement:
+  enabled: true
+  max_boost_steps: 96

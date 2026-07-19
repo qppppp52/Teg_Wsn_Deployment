@@ -43,3 +43,9 @@ def test_dqn_reward_near_zero_or_cost_penalized_when_stable_feasible():
     reward, parts = compute_reward(metrics, metrics, max_repair_iter=5)
     assert reward <= 0.0
     assert parts["R_cost"] > 0
+
+def test_dqn_reward_uses_configured_reward_clip():
+    before = {"CV_mean": 10.0, "FR": 0.0, "HV": 0.0, "pressure": {}}
+    after = {"CV_mean": 0.0, "FR": 1.0, "HV": 1.0, "pressure": {}}
+    reward, _ = compute_reward(before, after, reward_clip=(-0.2, 0.2))
+    assert reward == 0.2

@@ -69,3 +69,41 @@ def test_q_network_forward_and_agent_checkpoint():
     loaded = DQNAgent.from_checkpoint(str(ckpt), cfg)
     assert loaded.state_dim == 19
     assert loaded.action_dim == len(ACTIONS)
+
+def test_dqn_checkpoint_rejects_obsolete_policy_contract():
+    torch = pytest.importorskip("torch")
+    from src.dqn.dqn_agent import DQNAgent
+
+    cfg = make_dqn_config(hidden_dims=(16, 16), batch_size=2)
+    agent = DQNAgent(19, len(ACTIONS), cfg)
+    directory = _writable_test_dir()
+    source = directory / f"dqn_source_{uuid.uuid4().hex}.pt"
+    obsolete = directory / f"dqn_obsolete_{uuid.uuid4().hex}.pt"
+    agent.save(str(source))
+    checkpoint = torch.load(source, map_location="cpu")
+    checkpoint["metadata"]["policy_contract_version"] = 1
+    torch.save(checkpoint, obsolete)
+    with pytest.raises(ValueError, match="contract version is obsolete"):
+        DQNAgent.from_checkpoint(str(obsolete), cfg)
+
+
+def test_dqn_frozen_evaluation_evidence_detects_no_training_changes():
+    pytest.importorskip("torch")
+    from src.dqn.dqn_agent import DQNAgent
+    from src.optimizers.dqn_cr_mode import DQNCRMode
+
+    cfg = make_dqn_config(hidden_dims=(8,), batch_size=2)
+    agent = DQNAgent(19, len(ACTIONS), cfg)
+    agent.set_evaluation_mode()
+    optimizer = object.__new__(DQNCRMode)
+    optimizer.agent = agent
+    optimizer.execution_mode = "eval"
+    optimizer.checkpoint_loaded = True
+    optimizer.model_path = str(_writable_test_dir() / "formal.pt")
+    optimizer.config = {"runtime": {"output_dir": str(_writable_test_dir())}}
+    optimizer._evaluation_evidence_before = optimizer._agent_evidence()
+    optimizer.dqn_validity_report = {}
+    optimizer._finalize_dqn_validity()
+    assert optimizer.dqn_validity_report["DQN_VALID"] is True
+    assert optimizer.dqn_validity_report["parameter_hash_before"] == optimizer.dqn_validity_report["parameter_hash_after"]
+    assert optimizer.dqn_validity_report["gradient_steps_before"] == optimizer.dqn_validity_report["gradient_steps_after"]

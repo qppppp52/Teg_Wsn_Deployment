@@ -1,5 +1,6 @@
-"""外部Pareto档案"""
+"""External Pareto archive with constrained dominance semantics."""
 import copy
+
 import numpy as np
 
 
@@ -10,8 +11,23 @@ def _dominates(a, b):
         return False
     if not a.feasible and not b.feasible:
         return a.cv < b.cv
-    return (a.coverage >= b.coverage and a.rsum_capacity >= b.rsum_capacity and
-            (a.coverage > b.coverage or a.rsum_capacity > b.rsum_capacity))
+    return (
+        a.coverage >= b.coverage
+        and a.rsum_capacity >= b.rsum_capacity
+        and (a.coverage > b.coverage or a.rsum_capacity > b.rsum_capacity)
+    )
+
+
+def _equivalent(a, b):
+    if bool(a.feasible) != bool(b.feasible):
+        return False
+    same_objectives = (
+        abs(float(a.coverage) - float(b.coverage)) < 1.0e-9
+        and abs(float(a.rsum_capacity) - float(b.rsum_capacity)) < 1.0e-9
+    )
+    if not same_objectives:
+        return False
+    return bool(a.feasible) or abs(float(a.cv) - float(b.cv)) < 1.0e-12
 
 
 def _crowding_distance(objs):
@@ -44,23 +60,17 @@ class ParetoArchive:
     def _insert(self, sol):
         if not sol.feasible and self._has_any_feasible():
             return
-        # Skip exact duplicates: same (coverage, rsum) pair already stored
-        for existing in self.solutions:
-            if (abs(existing.coverage - sol.coverage) < 1e-9 and
-                abs(existing.rsum_capacity - sol.rsum_capacity) < 1e-9):
-                return  # duplicate, skip
         dominated = False
         to_remove = []
         for i, existing in enumerate(self.solutions):
-            if _dominates(existing, sol):
+            if _dominates(existing, sol) or _equivalent(existing, sol):
                 dominated = True
                 break
-            elif _dominates(sol, existing):
+            if _dominates(sol, existing):
                 to_remove.append(i)
         if not dominated:
             for i in sorted(to_remove, reverse=True):
                 self.solutions.pop(i)
-            # 深拷贝：防止后续repair变异导致归档解被污染
             self.solutions.append(copy.deepcopy(sol))
 
     def _prune(self):
@@ -68,27 +78,31 @@ class ParetoArchive:
             return
         objs = self.get_objectives()
         crowding = _crowding_distance(objs)
-        # 降序排列：保留拥挤距离大的解（极值点保持多样性）
         idx = np.argsort(crowding)[::-1]
-        self.solutions = [self.solutions[i] for i in idx[:self.max_size]]
+        self.solutions = [self.solutions[i] for i in idx[: self.max_size]]
 
     def _has_any_feasible(self):
-        return any(s.feasible for s in self.solutions)
+        return any(solution.feasible for solution in self.solutions)
 
     def get_objectives(self):
         if not self.solutions:
             return np.zeros((0, 2))
-        return np.array([[s.coverage, s.rsum_capacity] for s in self.solutions])
+        return np.array(
+            [[solution.coverage, solution.rsum_capacity] for solution in self.solutions]
+        )
 
     def get_feasible_objectives(self):
-        feasible = [s for s in self.solutions if s.feasible]
+        feasible = [solution for solution in self.solutions if solution.feasible]
         if not feasible:
             return np.zeros((0, 2))
-        return np.array([[s.coverage, s.rsum_capacity] for s in feasible])
+        return np.array(
+            [[solution.coverage, solution.rsum_capacity] for solution in feasible]
+        )
 
-    def save(self, path):
+    def save(self, path, ctx=None):
         from src.io.result_io import save_pareto
-        save_pareto(self.solutions, path)
+
+        save_pareto(self.solutions, path, ctx)
 
     def __len__(self):
         return len(self.solutions)

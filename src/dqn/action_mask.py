@@ -2,6 +2,27 @@
 from __future__ import annotations
 
 import numpy as np
+LOW_FR_ACTIONS = (
+    "balanced", "energy_first", "link_first", "ap_load_first", "sink_first",
+    "conservative_repair",
+)
+PRESSURE_ACTIONS = {
+    "energy": ("balanced", "energy_first", "conservative_repair", "sink_first"),
+    "link": ("balanced", "link_first", "ap_load_first", "rsum_capacity_priority"),
+    "capacity": ("balanced", "ap_load_first", "link_first", "conservative_repair"),
+    "sink": ("balanced", "sink_first", "energy_first", "conservative_repair"),
+}
+FEASIBLE_ACTIONS = (
+    "rsum_capacity_priority", "exploration_high_F", "diversity_boost",
+    "exploitation_low_F",
+)
+STAGNATION_ACTIONS = ("diversity_boost", "exploration_high_F")
+MASK_RULE_ACTION_NAMES = frozenset(
+    LOW_FR_ACTIONS
+    + tuple(name for actions in PRESSURE_ACTIONS.values() for name in actions)
+    + FEASIBLE_ACTIONS
+    + STAGNATION_ACTIONS
+)
 
 
 def build_dqn_action_mask(state_metrics: dict, actions: list, config: dict) -> np.ndarray:
@@ -19,16 +40,16 @@ def build_dqn_action_mask(state_metrics: dict, actions: list, config: dict) -> n
 
     dcfg = config.get("dqn", {}) if isinstance(config, dict) else {}
     action_mask_cfg = dcfg.get("action_mask", {})
-    if not action_mask_cfg.get("enabled", dcfg.get("action_mask_enabled", True)):
+    if not action_mask_cfg.get("enabled", True):
         return mask
 
     fr = _metric(state_metrics, "FR_after_repair", "FR", "feasible_ratio", default=0.0)
     cv = _metric(state_metrics, "CV_after_repair_mean", "CV_mean", "cv", default=0.0)
-    delta_hv = _metric(state_metrics, "delta_HV", "delta_HV_norm", default=0.0)
+    delta_hv = _metric(state_metrics, "delta_HV", "delta_HV_norm", default=None)
     hv_stall = int(_metric(state_metrics, "hv_stall_generations", "HV_stall", default=0))
     pressure = pressure_values(state_metrics)
 
-    thresholds = action_mask_cfg.get("thresholds", dcfg.get("mask", {}))
+    thresholds = action_mask_cfg.get("thresholds", {})
     low_fr = float(thresholds.get("low_fr", 0.2))
     feasible_fr = float(thresholds.get("feasible_fr", 0.8))
     low_cv = float(thresholds.get("low_cv", 1.0e-3))
@@ -41,24 +62,16 @@ def build_dqn_action_mask(state_metrics: dict, actions: list, config: dict) -> n
     dominant_value = pressure.get(dominant, 0.0) if dominant else 0.0
 
     if fr < low_fr:
-        mask = _allow_only(names, {
-            "balanced", "energy_first", "link_first", "ap_load_first", "sink_first", "conservative_repair",
-        })
-    elif dominant == "energy" and dominant_value > high_pressure:
-        mask = _allow_only(names, {"balanced", "energy_first", "conservative_repair", "sink_first"})
-    elif dominant == "link" and dominant_value > high_pressure:
-        mask = _allow_only(names, {"balanced", "link_first", "ap_load_first", "rsum_capacity_priority"})
-    elif dominant == "capacity" and dominant_value > high_pressure:
-        mask = _allow_only(names, {"balanced", "ap_load_first", "link_first", "conservative_repair"})
-    elif dominant == "sink" and dominant_value > high_pressure:
-        mask = _allow_only(names, {"balanced", "sink_first", "energy_first", "conservative_repair"})
+        mask = _allow_only(names, LOW_FR_ACTIONS)
+    elif dominant in PRESSURE_ACTIONS and dominant_value > high_pressure:
+        mask = _allow_only(names, PRESSURE_ACTIONS[dominant])
 
     if fr >= feasible_fr and cv <= low_cv:
-        _enable(mask, names, "rsum_capacity_priority", "exploration_high_F", "diversity_boost", "exploitation_low_F")
+        _enable(mask, names, *FEASIBLE_ACTIONS)
 
-    if hv_stall >= stall_generations or abs(delta_hv) <= small_delta_hv:
-        _enable(mask, names, "diversity_boost", "exploration_high_F")
-
+    hv_change_is_small = delta_hv is not None and abs(delta_hv) <= small_delta_hv
+    if fr >= low_fr and (hv_stall >= stall_generations or hv_change_is_small):
+        _enable(mask, names, *STAGNATION_ACTIONS)
     return _ensure_any(mask, names)
 
 
@@ -84,7 +97,8 @@ def dominant_pressure_name(metrics: dict) -> str:
     values = pressure_values(metrics)
     if not values:
         return ""
-    return max(values, key=values.get)
+    dominant = max(values, key=values.get)
+    return dominant if values[dominant] > 0.0 else ""
 
 
 def _allow_only(names, allowed_names):

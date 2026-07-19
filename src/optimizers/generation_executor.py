@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-from src.evaluator.individual_evaluator import evaluate_individual
+from src.evaluator.individual_evaluator import evaluate_individual, configured_max_repair_iter
 from src.model.population import Population
 from src.operators.mode_crossover import crossover
 from src.operators.mode_mutation import mutate, select_pareto_guide
@@ -23,6 +23,7 @@ class GenerationExecutor:
     def __init__(self, ctx, population_size: int):
         self.ctx = ctx
         self.population_size = int(population_size)
+        self.max_repair_iter = configured_max_repair_iter(ctx)
 
     def execute(self, population, action: dict) -> GenerationResult:
         parents = list(population.individuals)
@@ -45,6 +46,7 @@ class GenerationExecutor:
             solution, repaired = evaluate_individual(
                 trial,
                 self.ctx,
+                max_repair_iter=self.max_repair_iter,
                 repair_strategy=action.get("repair_strategy", action),
             )
             if repaired is not None:

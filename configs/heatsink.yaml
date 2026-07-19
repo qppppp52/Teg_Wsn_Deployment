@@ -5,5 +5,4 @@ heatsink:
   allow_sink_outside_neighborhood: false
   allow_sink_sink_overlap: false
   count_self_grid_as_sink: true
-  default_allocation_strategy: balanced
   neighbor_order: 1

@@ -40,6 +40,9 @@ class DQNTrainer:
         )
         self.records = []
         self.agent = None
+        self.best_checkpoint_written = False
+        self.best_validation_score = None
+        self.best_validation_episode = None
 
     def train(self):
         training_seeds = self.config.get("experiment", {}).get(
@@ -52,13 +55,28 @@ class DQNTrainer:
         )
         if len(training_seeds) < self.dqn_config.training_episodes:
             raise ValueError("Not enough dqn_training_seeds for configured episodes")
+        if not validation_seeds:
+            raise ValueError("dqn_validation_seeds must not be empty")
+        used_training_seeds = [int(seed) for seed in training_seeds[:self.dqn_config.training_episodes]]
+        used_validation_seeds = [int(seed) for seed in validation_seeds]
+        if len(used_training_seeds) != len(set(used_training_seeds)):
+            raise ValueError("dqn_training_seeds must be unique")
+        if len(used_validation_seeds) != len(set(used_validation_seeds)):
+            raise ValueError("dqn_validation_seeds must be unique")
+        if set(used_training_seeds).intersection(used_validation_seeds):
+            raise ValueError("DQN training and validation seeds must be disjoint")
+        formal_seeds = {int(seed) for seed in self.config.get("experiment", {}).get("seeds", [])}
+        if formal_seeds.intersection(used_validation_seeds):
+            raise ValueError("DQN validation seeds must be disjoint from formal experiment seeds")
 
         best_score = -np.inf
         validations_without_improvement = 0
         started = time.time()
         for episode in range(1, self.dqn_config.training_episodes + 1):
             seed = int(training_seeds[episode - 1])
-            optimizer = self._run_episode(seed, phase="train")
+            optimizer = self._run_episode(
+                seed, phase="train", run_label=f"train_episode_{episode:04d}_seed_{seed}"
+            )
             self.agent = optimizer.agent
             final_hv = float(optimizer.convergence_history["HV"][-1])
             record = {
@@ -75,7 +93,11 @@ class DQNTrainer:
 
             if episode % self.dqn_config.validation_interval == 0:
                 scores = [
-                    float(self._run_episode(int(val_seed), phase="eval").convergence_history["HV"][-1])
+                    float(self._run_episode(
+                        int(val_seed),
+                        phase="eval",
+                        run_label=f"validation_after_{episode:04d}_seed_{int(val_seed)}",
+                    ).convergence_history["HV"][-1])
                     for val_seed in validation_seeds
                 ]
                 score = float(np.median(scores))
@@ -84,6 +106,9 @@ class DQNTrainer:
                     best_score = score
                     validations_without_improvement = 0
                     self.agent.save(self.best_path)
+                    self.best_checkpoint_written = True
+                    self.best_validation_score = score
+                    self.best_validation_episode = episode
                 else:
                     validations_without_improvement += 1
                 logger.info(
@@ -97,15 +122,20 @@ class DQNTrainer:
                 logger.info(f"Early stopping at episode {episode}")
                 break
 
-        if not os.path.isfile(self.best_path):
+        if not self.best_checkpoint_written:
             self.agent.save(self.best_path)
+            self.best_checkpoint_written = True
         self._save_manifest(started)
         return self.best_path
 
-    def _run_episode(self, seed, phase):
+    def _run_episode(self, seed, phase, run_label=None):
         set_seed(seed, include_torch=True)
         episode_config = copy.deepcopy(self.config)
         episode_config.setdefault("runtime", {})["output_dir"] = self.output_dir
+        if run_label:
+            episode_config["runtime"]["dqn_action_log_path"] = os.path.join(
+                self.output_dir, "action_logs", f"{run_label}.csv"
+            )
         scenario = Scenario(episode_config).build()
         context = run_preprocessing(scenario, episode_config, seed)
         context.config = episode_config
@@ -131,6 +161,9 @@ class DQNTrainer:
         manifest = {
             "schema_version": 1,
             "training_episodes_completed": len(self.records),
+            "best_validation_score": self.best_validation_score,
+            "best_validation_episode": self.best_validation_episode,
+            "best_checkpoint_written_this_run": self.best_checkpoint_written,
             "best_checkpoint": os.path.abspath(self.best_path),
             "latest_checkpoint": os.path.abspath(self.latest_path),
             "population_size": self.config.get("mode", {}).get("population_size"),

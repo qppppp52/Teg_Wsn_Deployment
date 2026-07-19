@@ -37,6 +37,9 @@ def test_drl_init_cr_mode_smoke():
     cfg["drl_init"]["min_selected_sensors"] = 1
     cfg["drl_init"]["min_selected_aps"] = 1
     out_dir = _writable_test_dir() / f"drl_init_smoke_{uuid.uuid4().hex}"
+    cfg["drl_init"]["checkpoint_dir"] = str(out_dir / "checkpoints")
+    cfg["drl_init"]["load_checkpoint_if_exists"] = False
+    cfg["drl_init"]["force_retrain"] = True
     run_experiment(cfg, "drl_init_cr_mode", str(out_dir), 42)
     assert (out_dir / "data" / "convergence.csv").exists()
     assert (out_dir / "data" / "init_population_metrics.csv").exists()

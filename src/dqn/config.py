@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.physics.evaluation_contract import physical_evaluation_contract
 
 _LEGACY_KEYS = {
     "hidden_dims", "gamma", "lr", "batch_size", "replay_capacity",
@@ -40,6 +41,7 @@ class DQNConfig:
     training_episodes: int
     validation_interval: int
     validation_patience: int
+    environment_contract: dict
 
     @classmethod
     def from_mapping(cls, config: dict) -> "DQNConfig":
@@ -139,11 +141,16 @@ class DQNConfig:
             training_episodes=int(training.get("episodes", 120)),
             validation_interval=int(training.get("validation_interval", 5)),
             validation_patience=int(training.get("validation_patience", 20)),
+            environment_contract=physical_evaluation_contract(config),
         )
         result.validate()
         return result
 
     def validate(self):
+        if any(hidden <= 0 for hidden in self.hidden_dims):
+            raise ValueError("dqn.network.hidden_dims values must be positive")
+        if self.learning_rate <= 0.0 or self.grad_clip_norm <= 0.0:
+            raise ValueError("DQN learning_rate and grad_clip_norm must be positive")
         if not 0.0 <= self.gamma <= 1.0:
             raise ValueError("dqn.optimizer.gamma must be in [0, 1]")
         if self.batch_size <= 0 or self.min_replay_size < self.batch_size:
@@ -154,7 +161,40 @@ class DQNConfig:
             raise ValueError("Target update interval and epsilon decay steps must be positive")
         if self.reward_clip[0] >= self.reward_clip[1]:
             raise ValueError("dqn.reward.clip lower bound must be smaller than upper bound")
+        if not 0.0 <= self.epsilon_end <= self.epsilon_start <= 1.0:
+            raise ValueError("DQN epsilon values must satisfy 0 <= end <= start <= 1")
+        if self.updates_per_step <= 0 or self.training_episodes <= 0:
+            raise ValueError("DQN updates_per_step and training episodes must be positive")
+        if self.validation_interval <= 0 or self.validation_patience <= 0:
+            raise ValueError("DQN validation interval and patience must be positive")
+        if self.reward_warmup_steps < 0 or self.state_warmup_steps < 0:
+            raise ValueError("DQN normalizer warmup steps cannot be negative")
+        if self.state_clip <= 0.0:
+            raise ValueError("dqn.state_normalization.clip must be positive")
+        _validate_mask_thresholds(self.mask_thresholds)
+        enhancement = self.environment_contract.get("throughput_enhancement", {})
+        if enhancement.get("enabled") and int(enhancement.get("max_boost_steps", 0)) <= 0:
+            raise ValueError("throughput_enhancement.max_boost_steps must be positive")
 
+
+def _validate_mask_thresholds(thresholds):
+    allowed = {
+        "low_fr", "feasible_fr", "low_cv", "high_pressure",
+        "hv_stall_generations", "small_delta_hv",
+    }
+    _reject_unknown(thresholds, allowed, "dqn.action_mask.thresholds")
+    low_fr = float(thresholds.get("low_fr", 0.2))
+    feasible_fr = float(thresholds.get("feasible_fr", 0.8))
+    if not 0.0 <= low_fr <= feasible_fr <= 1.0:
+        raise ValueError("DQN mask FR thresholds must satisfy 0 <= low_fr <= feasible_fr <= 1")
+    if float(thresholds.get("low_cv", 1.0e-3)) < 0.0:
+        raise ValueError("DQN mask low_cv cannot be negative")
+    if float(thresholds.get("high_pressure", 0.4)) < 0.0:
+        raise ValueError("DQN mask high_pressure cannot be negative")
+    if int(thresholds.get("hv_stall_generations", 5)) <= 0:
+        raise ValueError("DQN mask hv_stall_generations must be positive")
+    if float(thresholds.get("small_delta_hv", 1.0e-5)) < 0.0:
+        raise ValueError("DQN mask small_delta_hv cannot be negative")
 
 def _reject_unknown(mapping, allowed, path):
     unknown = sorted(set(mapping) - set(allowed))

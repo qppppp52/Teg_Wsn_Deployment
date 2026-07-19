@@ -10,7 +10,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.rl_init.ppo_policy import torch
-
+from src.decoder.power_decoder import INITIAL_POWER_SEMANTICS_VERSION
+from src.heatsink.sink_ownership import SINK_OWNERSHIP_SEMANTICS_VERSION
+from src.power.power_repair import POWER_REPAIR_SEMANTICS_VERSION
+from src.power.throughput_enhancer import THROUGHPUT_ENHANCER_VERSION
+from src.physics.evaluation_contract import physical_evaluation_contract
 
 COMPATIBILITY_KEYS = [
     "scene_name",
@@ -78,6 +82,13 @@ def stable_config_hash(config: dict) -> str:
         "max_selected_aps": cfg.get("max_selected_aps"),
         "reward": cfg.get("reward", {}),
         "normalization": cfg.get("normalization", {}),
+        "evaluation_semantics": {
+            "environment": physical_evaluation_contract(config),
+            "throughput_enhancer_version": THROUGHPUT_ENHANCER_VERSION,
+            "heatsink_ownership_semantics_version": SINK_OWNERSHIP_SEMANTICS_VERSION,
+            "initial_power_semantics_version": INITIAL_POWER_SEMANTICS_VERSION,
+            "power_repair_semantics_version": POWER_REPAIR_SEMANTICS_VERSION,
+        },
         "network": {
             "candidate_feature_dim": net.get("candidate_feature_dim", "auto"),
             "global_feature_dim": net.get("global_feature_dim", "auto"),
@@ -112,6 +123,13 @@ def build_checkpoint_meta(agent, ctx, config: dict, checkpoint_mode: str | None 
         "max_selected_aps": int(cfg.get("max_selected_aps", config.get("deployment", {}).get("max_aps", 0))),
         "config_hash": stable_config_hash(config),
         "normalization": cfg.get("normalization", {}),
+        "evaluation_semantics": {
+            "environment": physical_evaluation_contract(config),
+            "throughput_enhancer_version": THROUGHPUT_ENHANCER_VERSION,
+            "heatsink_ownership_semantics_version": SINK_OWNERSHIP_SEMANTICS_VERSION,
+            "initial_power_semantics_version": INITIAL_POWER_SEMANTICS_VERSION,
+            "power_repair_semantics_version": POWER_REPAIR_SEMANTICS_VERSION,
+        },
         "created_at": datetime.now(timezone.utc).isoformat(),
         "git_branch": _git_branch(),
     }

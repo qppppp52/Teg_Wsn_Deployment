@@ -1,81 +1,123 @@
+"""Sensor-AP link constraints and deterministic normalization."""
+from __future__ import annotations
+
 import numpy as np
 
+from src.physics.numerical_tolerances import POWER_ABS_TOL
+
+
+def single_valid_connected_ap(solution, sensor_id, ctx):
+    """Return the sole fully valid AP global ID, otherwise return None."""
+    sensor_id = int(sensor_id)
+    if solution.x[sensor_id] != 1:
+        return None
+    connected = np.where(solution.c[sensor_id] == 1)[0]
+    if len(connected) != 1:
+        return None
+    ap_id = int(connected[0])
+    ptx_max = float(ctx.config.get("channel", {}).get("p_tx_max", 0.5))
+    ptx_min = float(ctx.ptx_min_matrix[sensor_id, ap_id])
+    if (
+        solution.y[ap_id] != 1
+        or ctx.link_feasible_matrix[sensor_id, ap_id] != 1
+        or not np.isfinite(ptx_min)
+        or ptx_min > ptx_max + POWER_ABS_TOL
+    ):
+        return None
+    return ap_id
+
+
 def check_link_constraints(solution, ctx):
-    """
-    建模文件约束检查：
-    1. c_ij ≤ x_i, c_ij ≤ y_j  (连接存在性)
-    2. Σ_j c_ij == x_i  (一对一关联)
-    3. γ_ij ≥ γ_th (链路可达性/SNR)
-    4. p_tx_ij ≤ p_tx_max (功率上限)
-    """
     cv = 0.0
     K = ctx.num_candidates
     ptx_max = float(ctx.config.get("channel", {}).get("p_tx_max", 0.5))
 
-    for i in range(K):
-        for j in range(K):
-            if solution.c[i, j] == 1:
-                # 连接存在性: c_ij ≤ x_i
-                if solution.x[i] != 1:
-                    cv += 1.0
-                # 连接存在性: c_ij ≤ y_j
-                if solution.y[j] != 1:
-                    cv += 1.0
-                # SNR 约束
-                if ctx.link_feasible_matrix[i, j] == 0:
-                    cv += 1.0
-                # 发射功率上限
-                if solution.p_tx[i, j] > ptx_max:
-                    cv += 1.0
+    for sensor_id in range(K):
+        for ap_id in range(K):
+            if solution.c[sensor_id, ap_id] != 1:
+                continue
+            if solution.x[sensor_id] != 1:
+                cv += 1.0
+            if solution.y[ap_id] != 1:
+                cv += 1.0
+            if ctx.link_feasible_matrix[sensor_id, ap_id] == 0:
+                cv += 1.0
+            power = float(solution.p_tx[sensor_id, ap_id])
+            if power > ptx_max + POWER_ABS_TOL:
+                cv += 1.0
+            ptx_min = float(ctx.ptx_min_matrix[sensor_id, ap_id])
+            if power + POWER_ABS_TOL < ptx_min:
+                cv += 1.0
 
-    # 一对一关联约束: 每个已部署传感器必须且只能连接一个AP
-    for si in np.where(solution.x == 1)[0]:
-        n_conn = int(np.sum(solution.c[si]))
-        if n_conn < 1:
+    for sensor_id in np.where(solution.x == 1)[0]:
+        connection_count = int(np.sum(solution.c[sensor_id]))
+        if connection_count < 1:
             cv += 1.0
-        elif n_conn > 1:
-            cv += n_conn - 1
-
+        elif connection_count > 1:
+            cv += connection_count - 1
     return cv
 
 
 def repair_link_constraints(solution, ctx):
-    """修复链路约束"""
-    sids = np.where(solution.x == 1)[0]
-    aids = np.where(solution.y == 1)[0]
-    Cmax = ctx.config["ap"]["C_max"]
-
-    # 清理不存在的连接 (c_ij=1但x_i=0或y_j=0)
-    for i in range(ctx.num_candidates):
-        for j in range(ctx.num_candidates):
-            if solution.c[i, j] == 1:
-                if solution.x[i] != 1 or solution.y[j] != 1:
-                    solution.c[i, j] = 0
-
-    # 对传感器一对一修复
-    for si in sids:
-        conn = np.where(solution.c[si] == 1)[0]
-        if len(conn) > 1:
-            # 保留一个最好的
-            best = min(conn, key=lambda aj: ctx.ptx_min_matrix[si, aj])
-            for aj in conn:
-                if aj != best:
-                    solution.c[si, aj] = 0
-
-        # 无连接时尝试分配
-        needs_reconnect = (np.sum(solution.c[si]) == 0)
-        if needs_reconnect:
-            loads = np.sum(solution.c, axis=0)
-            feasible = [(aj, ctx.ptx_min_matrix[si, aj])
-                       for aj in aids
-                       if ctx.link_feasible_matrix[si, aj] == 1 and loads[aj] < Cmax]
-            if feasible:
-                feasible.sort(key=lambda t: t[1])
-                solution.c[si, feasible[0][0]] = 1
-
-    # 功率上限修复
+    """Normalize connections and clear all stale power entries."""
+    K = ctx.num_candidates
+    ap_ids = np.where(solution.y == 1)[0]
+    capacity = int(ctx.config["ap"]["C_max"])
     ptx_max = float(ctx.config.get("channel", {}).get("p_tx_max", 0.5))
-    for i in range(ctx.num_candidates):
-        for j in range(ctx.num_candidates):
-            if solution.c[i, j] == 1 and solution.p_tx[i, j] > ptx_max:
-                solution.p_tx[i, j] = ptx_max
+    previous_power = solution.p_tx.copy()
+
+    for sensor_id in range(K):
+        for ap_id in range(K):
+            if solution.c[sensor_id, ap_id] != 1:
+                continue
+            if (
+                solution.x[sensor_id] != 1
+                or solution.y[ap_id] != 1
+                or ctx.link_feasible_matrix[sensor_id, ap_id] != 1
+                or ctx.ptx_min_matrix[sensor_id, ap_id] > ptx_max + POWER_ABS_TOL
+            ):
+                solution.c[sensor_id, ap_id] = 0
+
+    for sensor_id in np.where(solution.x == 1)[0]:
+        connected = np.where(solution.c[sensor_id] == 1)[0]
+        if len(connected) > 1:
+            best_ap = min(
+                (int(ap_id) for ap_id in connected),
+                key=lambda ap_id: (
+                    float(ctx.ptx_min_matrix[sensor_id, ap_id]),
+                    ap_id,
+                ),
+            )
+            solution.c[sensor_id] = 0
+            solution.c[sensor_id, best_ap] = 1
+
+        if not np.any(solution.c[sensor_id]):
+            loads = np.sum(solution.c, axis=0)
+            feasible = [
+                int(ap_id)
+                for ap_id in ap_ids
+                if ctx.link_feasible_matrix[sensor_id, ap_id] == 1
+                and ctx.ptx_min_matrix[sensor_id, ap_id] <= ptx_max + POWER_ABS_TOL
+                and loads[ap_id] < capacity
+            ]
+            if feasible:
+                best_ap = min(
+                    feasible,
+                    key=lambda ap_id: (
+                        float(ctx.ptx_min_matrix[sensor_id, ap_id]),
+                        ap_id,
+                    ),
+                )
+                solution.c[sensor_id, best_ap] = 1
+
+    solution.p_tx.fill(0.0)
+    for sensor_id in np.where(solution.x == 1)[0]:
+        ap_id = single_valid_connected_ap(solution, sensor_id, ctx)
+        if ap_id is None:
+            continue
+        ptx_min = float(ctx.ptx_min_matrix[sensor_id, ap_id])
+        previous = float(previous_power[sensor_id, ap_id])
+        solution.p_tx[sensor_id, ap_id] = min(
+            ptx_max, max(ptx_min, previous if previous > 0.0 else ptx_min)
+        )
+    return solution

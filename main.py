@@ -24,7 +24,7 @@ from src.optimizers.drl_init_cr_mode import DRLInitCRMode
 from src.visualization.plot_convergence import plot_convergence, plot_dual_convergence
 from src.visualization.plot_deployment import plot_deployment
 from src.visualization.temperature_plot import export_candidate_temperature, plot_temperature_faces, plot_pgrid_distribution
-from src.io.result_io import save_log
+from src.io.result_io import RESULT_SCHEMA_VERSION, save_log
 from src.physics.analytic_temperature import sample_heat_source_ids
 from src.utils.seed import set_seed
 from src.utils.logger import get_logger
@@ -131,7 +131,7 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None,
     archive = algo.run()
     runtime_seconds = time.time() - start
 
-    archive.save(os.path.join(pareto_dir, f"{algorithm}.npz"))
+    archive.save(os.path.join(pareto_dir, f"{algorithm}.npz"), ctx)
     _save_context(ctx, os.path.join(pareto_dir, f"{algorithm}_context.npz"))
     _save_heat_sources(ctx, seed, os.path.join(pareto_dir, f"{algorithm}_heat_sources.npz"))
     if save_preprocess_outputs:
@@ -146,6 +146,11 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None,
     representatives = _representative_solutions(archive.solutions, config)
     _save_convergence_csv(history, os.path.join(data_dir, "convergence.csv"))
     _save_pareto_csv(archive.solutions, representatives, os.path.join(data_dir, "pareto_solutions.csv"))
+    _save_pareto_solution_details_csv(
+        archive.solutions,
+        os.path.join(data_dir, "pareto_solution_details.csv"),
+        ctx,
+    )
     _save_recommended_solution_csv(representatives, os.path.join(data_dir, "recommended_solutions.csv"))
     _plot_standard_convergence(history, fig_dir, algorithm, config)
 
@@ -257,6 +262,72 @@ def _save_pareto_csv(solutions, representatives, path):
         writer.writerow(["solution_id", "coverage", "rsum_capacity", "cv", "active_sensors", "active_aps", "recommended_flag", "coverage_best_flag", "rsum_best_flag"])
         for idx, solution in enumerate(feasible):
             writer.writerow([idx, solution.coverage, solution.rsum_capacity, solution.cv, int(np.sum(solution.x)), int(np.sum(solution.y)), int(solution is rec), int(solution is cov_best), int(solution is rsum_best)])
+
+
+
+def _save_pareto_solution_details_csv(solutions, path, ctx):
+    from src.heatsink.sink_ownership import build_sink_ownership
+
+    feasible = [solution for solution in solutions if solution.feasible]
+    fields = [
+        "solution_id",
+        "coverage",
+        "rsum_capacity",
+        "n_req_sensor_total",
+        "n_req_ap_total",
+        "effective_sensor_sink_total",
+        "effective_ap_sink_total",
+        "boost_applied",
+        "boost_sinks_added",
+        "boost_iterations",
+        "rsum_capacity_before_boost",
+        "rsum_capacity_after_boost",
+        "rsum_capacity_boost_gain",
+        "boost_stop_reason",
+    ]
+    with open(path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fields)
+        writer.writeheader()
+        for solution_id, solution in enumerate(feasible):
+            ownership = build_sink_ownership(solution, ctx)
+            writer.writerow(
+                {
+                    "solution_id": solution_id,
+                    "coverage": solution.coverage,
+                    "rsum_capacity": solution.rsum_capacity,
+                    "n_req_sensor_total": int(solution.n_sink_sensor.sum()),
+                    "n_req_ap_total": int(solution.n_sink_ap.sum()),
+                    "effective_sensor_sink_total": int(
+                        sum(ownership.effective_sensor_count)
+                    ),
+                    "effective_ap_sink_total": int(sum(ownership.effective_ap_count)),
+                    "boost_applied": bool(
+                        solution.metadata.get("boost_applied", False)
+                    ),
+                    "boost_sinks_added": int(
+                        solution.metadata.get("boost_sinks_added", 0)
+                    ),
+                    "boost_iterations": int(
+                        solution.metadata.get("boost_iterations", 0)
+                    ),
+                    "rsum_capacity_before_boost": float(
+                        solution.metadata.get(
+                            "rsum_capacity_before_boost", solution.rsum_capacity
+                        )
+                    ),
+                    "rsum_capacity_after_boost": float(
+                        solution.metadata.get(
+                            "rsum_capacity_after_boost", solution.rsum_capacity
+                        )
+                    ),
+                    "rsum_capacity_boost_gain": float(
+                        solution.metadata.get("rsum_capacity_boost_gain", 0.0)
+                    ),
+                    "boost_stop_reason": solution.metadata.get(
+                        "boost_stop_reason", ""
+                    ),
+                }
+            )
 
 def _save_recommended_solution_csv(representatives, path):
     with open(path, "w", newline="", encoding="utf-8") as f:
@@ -387,17 +458,34 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         "rsum_ref_min": _drl_norm_value(config, "rsum_ref_min", 0.0),
         "rsum_ref_max": _drl_norm_value(config, "rsum_ref_max", 1.0),
         "rsum_reward_normalization": _rsum_reward_normalization_definition(),
+        "result_schema_version": RESULT_SCHEMA_VERSION,
+        "mode_individual_evaluations": int(getattr(algo, "evaluation_count", 0)),
+        "boost_invocations": int(getattr(algo, "boost_invocations", 0)),
+        "boost_candidate_evaluations": int(getattr(algo, "boost_candidate_evaluations", 0)),
+        "boost_accepted_steps": int(getattr(algo, "boost_accepted_steps", 0)),
+        "boost_runtime_ms": float(getattr(algo, "boost_runtime_ms", 0.0)),
     }
     if algorithm == "dqn_cr_mode":
         training_log = getattr(algo, "training_log", [])
         rewards = [float(row.get("reward", 0.0)) for row in training_log]
         actions = [row.get("action_name", "") for row in training_log]
+        validity = dict(getattr(algo, "dqn_validity_report", {}) or {})
         summary.update({
             "mean_reward": float(np.mean(rewards)) if rewards else 0.0,
             "last_epsilon": float(training_log[-1].get("epsilon", float("nan"))) if training_log else float("nan"),
             "most_used_action": max(set(actions), key=actions.count) if actions else "",
             "dqn_execution_mode": getattr(algo, "execution_mode", ""),
             "dqn_model_path": getattr(algo, "model_path", None) or "",
+            "DQN_VALID": validity.get("DQN_VALID", False),
+            "checkpoint_loaded": validity.get("checkpoint_loaded", False),
+            "epsilon": validity.get("epsilon", float("nan")),
+            "collect_experience": validity.get("collect_experience", True),
+            "parameter_hash_before": validity.get("parameter_hash_before", ""),
+            "parameter_hash_after": validity.get("parameter_hash_after", ""),
+            "gradient_steps_before": validity.get("gradient_steps_before", -1),
+            "gradient_steps_after": validity.get("gradient_steps_after", -1),
+            "interaction_steps_before": validity.get("interaction_steps_before", -1),
+            "interaction_steps_after": validity.get("interaction_steps_after", -1),
         })
     if algorithm == "drl_init_cr_mode":
         init_metrics = getattr(algo, "init_metrics", [])
@@ -549,7 +637,7 @@ def _build_dqn_action_reward_rows(root, summaries):
         if summary.get("algorithm") != "dqn_cr_mode":
             continue
         seed = summary.get("seed")
-        path = os.path.join(root, "dqn_cr_mode", f"seed_{seed}", "data", "dqn_training_log.csv")
+        path = os.path.join(root, "dqn_cr_mode", f"seed_{seed}", "data", "dqn_evaluation_action_log.csv")
         if not os.path.exists(path):
             continue
         with open(path, newline="", encoding="utf-8") as f:
@@ -621,6 +709,11 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
     gen0_rows = gen0_rows or []
     dqn_rows = dqn_rows or []
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    dqn_runs = [row for row in summaries if row.get("algorithm") == "dqn_cr_mode"]
+    invalid_dqn = [
+        row for row in dqn_runs
+        if str(row.get("DQN_VALID", "")).lower() != "true"
+    ]
     drl_rows = [row for row in summaries if row.get("algorithm") == "drl_init_cr_mode"]
     fallback = [row for row in drl_rows if row.get("policy_source") == "fallback" or str(row.get("torch_available", "")).lower() == "false"]
     invalid_drl = [
@@ -645,6 +738,7 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
         f"- rsum_ref_max: {_drl_norm_value(config, 'rsum_ref_max', 1.0)}",
         f"- Rsum reward normalization: {_rsum_reward_normalization_definition()}",
         "", "## Environment Checks", "",
+        f"- DQN runs: {len(dqn_runs)}", f"- Invalid formal DQN runs: {len(invalid_dqn)}",
         f"- DRL-Init runs: {len(drl_rows)}", f"- Fallback runs: {len(fallback)}",
         f"- Invalid formal DRL-Init runs: {len(invalid_drl)}",
         f"- Incompatible checkpoint runs: {len(incompatible)}", "",
@@ -668,6 +762,16 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
             f"{row.get('gen0_CV_after_repair', '')} | {row.get('gen0_best_coverage', '')} | "
             f"{row.get('gen0_best_rsum_capacity', '')} | {row.get('gen0_pareto_count', '')} | {row.get('gen0_diversity', '')} |"
         )
+    lines.extend(["", "## DQN Frozen-Evaluation Evidence", "",
+        "| seed | valid | checkpoint | epsilon | collect experience | parameter hash unchanged | gradient steps unchanged |",
+        "|---:|---|---|---:|---|---|---|"])
+    for row in dqn_runs:
+        lines.append(
+            f"| {row.get('seed', '')} | {row.get('DQN_VALID', '')} | {row.get('checkpoint_loaded', '')} | "
+            f"{row.get('epsilon', '')} | {row.get('collect_experience', '')} | "
+            f"{row.get('parameter_hash_before', '') == row.get('parameter_hash_after', '')} | "
+            f"{row.get('gradient_steps_before', '') == row.get('gradient_steps_after', '')} |"
+        )
     lines.extend(["", "## DQN Action And Reward Diagnostics", "",
         "| seed | mean reward | final epsilon | most used action | mean allowed actions |",
         "|---:|---:|---:|---|---:|"])
@@ -676,7 +780,7 @@ def _write_experiment_validity_report(summaries, path, config=None, command="", 
             f"| {row.get('seed', '')} | {row.get('mean_reward', '')} | {row.get('final_epsilon', '')} | "
             f"{row.get('most_used_action', '')} | {row.get('mean_num_allowed_actions', '')} |"
         )
-    status = "PASS" if not fallback and not incompatible and not pareto_single else "REVIEW"
+    status = "PASS" if not invalid_dqn and not invalid_drl and not fallback and not incompatible and not pareto_single else "REVIEW"
     lines.extend(["", "## Validity Verdict", "", f"- Status: {status}", f"- Pareto count <= 1 concerns: {len(pareto_single)}"] )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
@@ -686,6 +790,7 @@ def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None
     config = config or {}
     gen0_rows = gen0_rows or []
     dqn_rows = dqn_rows or []
+    dqn_runs = [row for row in summaries if row.get("algorithm") == "dqn_cr_mode"]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lines = [
         "# Final Experiment Summary", "", "## Configuration", "",
@@ -714,6 +819,16 @@ def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None
             f"{row.get('final_CV_after_repair', '')} | {row.get('final_HV', '')} | {row.get('pareto_count', '')} | "
             f"{row.get('best_rsum_capacity', '')} |"
         )
+    lines.extend(["", "## DQN Frozen-Evaluation Evidence", "",
+        "| seed | valid | checkpoint | epsilon | collect experience | parameter hash unchanged | gradient steps unchanged |",
+        "|---:|---|---|---:|---|---|---|"])
+    for row in dqn_runs:
+        lines.append(
+            f"| {row.get('seed', '')} | {row.get('DQN_VALID', '')} | {row.get('checkpoint_loaded', '')} | "
+            f"{row.get('epsilon', '')} | {row.get('collect_experience', '')} | "
+            f"{row.get('parameter_hash_before', '') == row.get('parameter_hash_after', '')} | "
+            f"{row.get('gradient_steps_before', '') == row.get('gradient_steps_after', '')} |"
+        )
     lines.extend(["", "## DQN Action And Reward Diagnostics", "",
         "| seed | mean reward | final epsilon | most used action | mean allowed actions |",
         "|---:|---:|---:|---|---:|"])
@@ -730,8 +845,14 @@ def _write_final_experiment_summary(summaries, path, config=None, gen0_rows=None
         f.write("\n".join(lines) + "\n")
 def _collect_reproducibility_evidence(config, command, start_time, end_time):
     import py_compile
-    py_files = ["main.py", "src/rl_init/reward.py", "src/rl_init/population_generator.py", "src/rl_init/checkpoint.py", "src/rl_init/ppo_trainer.py", "src/rl_init/init_evaluator.py"]
-    yaml_files = ["configs/experiment_small_compare.yaml", "configs/drl_init.yaml", "configs/channel_small.yaml"]
+    py_files = [
+        "main.py", "src/dqn/action_mask.py", "src/dqn/action_space.py",
+        "src/dqn/dqn_agent.py", "src/dqn/dqn_trainer.py",
+        "src/optimizers/dqn_cr_mode.py", "src/rl_init/reward.py",
+        "src/rl_init/population_generator.py", "src/rl_init/checkpoint.py",
+        "src/rl_init/ppo_trainer.py", "src/rl_init/init_evaluator.py",
+    ]
+    yaml_files = ["configs/experiment_small_compare.yaml", "configs/dqn.yaml", "configs/drl_init.yaml", "configs/channel_small.yaml"]
     try:
         for file_path in py_files:
             py_compile.compile(file_path, doraise=True)
@@ -785,6 +906,9 @@ def _run_validation_pytest_summary(config=None):
     timeout_seconds = int(report_cfg.get("pytest_timeout_seconds", 180))
     tests = [
         "tests/test_dqn_action_mask.py",
+        "tests/test_dqn_action_space.py",
+        "tests/test_dqn_components.py",
+        "tests/test_dqn_training_contract.py",
         "tests/test_rl_init_quality_score.py",
         "tests/test_rl_init_diversity_metrics.py",
         "tests/test_drl_init_training_log.py",

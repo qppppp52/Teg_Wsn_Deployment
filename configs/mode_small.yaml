@@ -10,7 +10,6 @@ mode:
   crossover_rate_max: 0.9
   mutation_strategy: rand_1
   initialization: mixed
-  power_strategy: energy_balanced
   repair_strategy: balanced
 
 evaluation:

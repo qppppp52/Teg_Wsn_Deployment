@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import numpy as np
 
 from src.optimizers.base_optimizer import BaseOptimizer
 from src.model.population import Population
 from src.model.pareto_archive import ParetoArchive
-from src.evaluator.individual_evaluator import evaluate_individual
-from src.dqn.action_space import ACTIONS, get_action, action_dim
+from src.evaluator.individual_evaluator import evaluate_individual, configured_max_repair_iter
+from src.dqn.action_space import ACTIONS, action_dim, audit_action_space, get_action
 from src.dqn.action_mask import build_dqn_action_mask, action_mask_diagnostics
 from src.dqn.config import DQNConfig
 from src.dqn.state_builder import build_state
@@ -38,8 +39,21 @@ class DQNCRMode(BaseOptimizer):
         self.training_log = []
         self.model_path = None
         self.evaluation_count = 0
+        self.checkpoint_loaded = False
+        self.dqn_validity_report = {}
+        self._evaluation_evidence_before = None
         self.executor = GenerationExecutor(ctx, self.NP)
+        self.max_repair_iter = configured_max_repair_iter(ctx)
         self.dqn_config = DQNConfig.from_mapping(config)
+        self.action_audit = audit_action_space()
+        for audit_row in self.action_audit:
+            logger.info(
+                "Action contract | id=%s name=%s signature=%s aliases=%s",
+                audit_row["action_id"],
+                audit_row["action_name"],
+                audit_row["effective_signature"],
+                audit_row["aliased_with"],
+            )
         self.execution_mode = str(phase or self.dqn_config.mode).lower()
         if self.execution_mode not in {"train", "eval"}:
             raise ValueError("DQN execution phase must be 'train' or 'eval'")
@@ -61,8 +75,12 @@ class DQNCRMode(BaseOptimizer):
             self.agent = DQNAgent.from_checkpoint(checkpoint, config)
             self.agent.set_evaluation_mode()
             self.model_path = checkpoint
+            self.checkpoint_loaded = True
         else:
             self.agent = DQNAgent(state_dim, action_dim(), config)
+
+        if self.execution_mode == "eval":
+            self._evaluation_evidence_before = self._agent_evidence()
 
     def initialize_population(self):
         mapping = self.ctx.index_mapping
@@ -89,13 +107,18 @@ class DQNCRMode(BaseOptimizer):
     def evaluate_population(self):
         self.population.solutions = []
         for index, individual in enumerate(self.population.individuals):
-            solution, repaired = evaluate_individual(individual, self.ctx)
+            solution, repaired = evaluate_individual(
+                individual,
+                self.ctx,
+                max_repair_iter=self.max_repair_iter,
+            )
             if repaired is not None:
                 individual = repaired
                 self.population.individuals[index] = individual
             copy_solution_metrics(individual, solution)
             self.population.solutions.append(solution)
             self.evaluation_count += 1
+        self._record_boost_statistics(self.population.solutions)
 
     def run(self):
         self.population = self.initialize_population()
@@ -113,10 +136,14 @@ class DQNCRMode(BaseOptimizer):
         )
         hv_stall = 0
         mask = self._build_mask(current_metrics, hv_stall)
+        mask_delta_hv = None
         self._log_generation(0, None, None, current_metrics)
 
         for generation in range(1, self.Tmax + 1):
+            current_mask_hv_stall = hv_stall
+            current_mask_delta_hv = mask_delta_hv
             deterministic = self.execution_mode == "eval"
+            epsilon_used = 0.0 if deterministic else self.agent.epsilon()
             action_id = self.agent.select_action(
                 state,
                 action_mask=mask,
@@ -131,6 +158,7 @@ class DQNCRMode(BaseOptimizer):
             })
             self.population = result.population
             self.evaluation_count += result.evaluations
+            self._record_boost_statistics(result.trial_solutions)
             self.archive.update(result.trial_solutions)
             self._record_convergence()
             next_metrics = self._metrics()
@@ -145,13 +173,15 @@ class DQNCRMode(BaseOptimizer):
                 generation,
                 self.Tmax,
             )
-            improved = next_metrics["HV"] > current_metrics["HV"] + 1.0e-12
+            delta_hv = next_metrics["HV"] - current_metrics["HV"]
+            improved = delta_hv > 1.0e-12
             hv_stall = 0 if improved else hv_stall + 1
-            next_mask = self._build_mask(next_metrics, hv_stall)
+            next_mask = self._build_mask(next_metrics, hv_stall, delta_hv)
             reward, parts = compute_reward(
                 current_metrics,
                 next_metrics,
-                self.config.get("constraints", {}).get("max_repair_iter", 5),
+                self.max_repair_iter,
+                self.dqn_config.reward_clip,
             )
             loss = None
             if self.execution_mode == "train":
@@ -176,7 +206,7 @@ class DQNCRMode(BaseOptimizer):
                 "action_name": action["name"],
                 "reward": reward,
                 **parts,
-                "epsilon": 0.0 if deterministic else self.agent.epsilon(),
+                "epsilon": epsilon_used,
                 "loss": loss if loss is not None else np.nan,
                 "q_mean": q_mean,
                 "q_max": q_max,
@@ -185,6 +215,9 @@ class DQNCRMode(BaseOptimizer):
                 "num_allowed_actions": mask_diag["num_allowed_actions"],
                 "allowed_action_names": mask_diag["allowed_action_names"],
                 "dominant_pressure": mask_diag["dominant_pressure"],
+                "delta_HV_for_mask": current_mask_delta_hv,
+                "hv_stall_generations_for_mask": current_mask_hv_stall,
+                "action_was_allowed": bool(mask[action_id]),
                 "FR_after_repair": next_metrics["FR"],
                 "CV_after_repair": next_metrics["CV_mean"],
                 "HV": next_metrics["HV"],
@@ -198,13 +231,65 @@ class DQNCRMode(BaseOptimizer):
 
             state = next_state
             mask = next_mask
+            mask_delta_hv = delta_hv
             current_metrics = next_metrics
             if generation % 10 == 0 or generation == self.Tmax:
                 self._log_generation(generation, action, reward, current_metrics)
 
         self._save_training_log()
         self._save_model()
+        self._finalize_dqn_validity()
         return self.archive
+
+    def _agent_evidence(self):
+        return {
+            "parameter_hash": self.agent.parameter_hash(),
+            "gradient_steps": int(self.agent.gradient_steps),
+            "interaction_steps": int(self.agent.interaction_steps),
+            "replay_size": len(self.agent.replay),
+            "state_normalizer_count": int(self.agent.state_normalizer.count),
+            "reward_normalizer_count": int(self.agent.reward_normalizer.count),
+        }
+
+    def _finalize_dqn_validity(self):
+        if self.execution_mode != "eval":
+            return
+        before = dict(self._evaluation_evidence_before or self._agent_evidence())
+        after = self._agent_evidence()
+        unchanged = all(before[key] == after[key] for key in before)
+        self.dqn_validity_report = {
+            "DQN_VALID": bool(
+                self.checkpoint_loaded
+                and unchanged
+                and self.agent.state_normalizer.frozen
+                and self.agent.reward_normalizer.frozen
+            ),
+            "checkpoint_loaded": bool(self.checkpoint_loaded),
+            "checkpoint_path": os.path.abspath(self.model_path) if self.model_path else "",
+            "execution_mode": self.execution_mode,
+            "epsilon": 0.0,
+            "collect_experience": False,
+            "parameter_hash_before": before["parameter_hash"],
+            "parameter_hash_after": after["parameter_hash"],
+            "gradient_steps_before": before["gradient_steps"],
+            "gradient_steps_after": after["gradient_steps"],
+            "interaction_steps_before": before["interaction_steps"],
+            "interaction_steps_after": after["interaction_steps"],
+            "replay_size_before": before["replay_size"],
+            "replay_size_after": after["replay_size"],
+            "state_normalizer_count_before": before["state_normalizer_count"],
+            "state_normalizer_count_after": after["state_normalizer_count"],
+            "reward_normalizer_count_before": before["reward_normalizer_count"],
+            "reward_normalizer_count_after": after["reward_normalizer_count"],
+            "state_normalizer_frozen": bool(self.agent.state_normalizer.frozen),
+            "reward_normalizer_frozen": bool(self.agent.reward_normalizer.frozen),
+        }
+        if self.checkpoint_loaded:
+            base = self.config.get("runtime", {}).get("output_dir", "results")
+            path = os.path.join(base, "data", "dqn_validity_report.json")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as file:
+                json.dump(self.dqn_validity_report, file, indent=2)
 
     def _record_convergence(self):
         record_generation(
@@ -214,9 +299,11 @@ class DQNCRMode(BaseOptimizer):
             self.config,
         )
 
-    def _build_mask(self, metrics, hv_stall):
+    def _build_mask(self, metrics, hv_stall, delta_hv=None):
         mask_metrics = dict(metrics)
         mask_metrics["hv_stall_generations"] = hv_stall
+        if delta_hv is not None:
+            mask_metrics["delta_HV"] = float(delta_hv)
         return build_dqn_action_mask(mask_metrics, ACTIONS, self.config)
 
     def _metrics(self):
@@ -234,15 +321,17 @@ class DQNCRMode(BaseOptimizer):
                 for key in ["deploy", "link", "capacity", "energy", "sink", "service", "total"]
             }
         rsum_max = float(self.config.get("evaluation", {}).get("rsum_ref_max", 2.0e8))
+        best_rsum_capacity = max(
+            [float(solution.rsum_capacity) for solution in feasible],
+            default=0.0,
+        )
         return {
             "CV_mean": float(np.mean([solution.cv for solution in solutions])) if solutions else 0.0,
             "FR": len(feasible) / len(solutions) if solutions else 0.0,
             "HV": self.convergence_history["HV"][-1] if self.convergence_history["HV"] else 0.0,
             "best_coverage": max([solution.coverage for solution in feasible], default=0.0),
-            "best_rsum_norm": max(
-                [float(solution.rsum_capacity) for solution in feasible],
-                default=0.0,
-            ) / max(rsum_max, 1.0),
+            "best_rsum_capacity": best_rsum_capacity,
+            "best_rsum_norm": best_rsum_capacity / max(rsum_max, 1.0),
             "diversity": objective_space_diversity(solutions),
             "pressure": pressure,
             "mean_repair_iter": float(np.mean([
@@ -256,15 +345,23 @@ class DQNCRMode(BaseOptimizer):
         logger.info(
             f"Gen {generation:4d} | action={action_name} reward={reward_text} "
             f"FR={metrics['FR']:.3f} CV={metrics['CV_mean']:.4f} "
+            f"Cov={metrics['best_coverage']:.3f} "
+            f"Rsum={metrics['best_rsum_capacity']:.1f} "
             f"Archive={len(self.archive)} Evals={self.evaluation_count}"
         )
 
     def _save_training_log(self):
         if not self.training_log:
             return
-        base = self.config.get("runtime", {}).get("output_dir", "results")
-        os.makedirs(os.path.join(base, "data"), exist_ok=True)
-        path = os.path.join(base, "data", "dqn_training_log.csv")
+        runtime = self.config.get("runtime", {})
+        base = runtime.get("output_dir", "results")
+        default_name = (
+            "dqn_evaluation_action_log.csv"
+            if self.execution_mode == "eval"
+            else "dqn_training_action_log.csv"
+        )
+        path = runtime.get("dqn_action_log_path") or os.path.join(base, "data", default_name)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", newline="", encoding="utf-8") as file:
             writer = csv.DictWriter(file, fieldnames=list(self.training_log[0].keys()))
             writer.writeheader()

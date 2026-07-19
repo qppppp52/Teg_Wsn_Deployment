@@ -9,4 +9,3 @@ class StrategyController:
         self.CR_max = mc.get("crossover_rate_max", 0.9)
         self.mutation_strategy = mc.get("mutation_strategy", "standard_rand")
         self.repair_strategy = mc.get("repair_strategy", "balanced")
-        self.power_strategy = mc.get("power_strategy", "conservative")

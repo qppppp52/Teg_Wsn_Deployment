@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 from src.evaluation.generation_diagnostics import make_convergence_history, record_generation
-from src.evaluator.individual_evaluator import evaluate_individual
+from src.evaluator.individual_evaluator import evaluate_individual, configured_max_repair_iter
 from src.io.population_snapshot import load_population_snapshot, save_population_snapshot
 from src.model.pareto_archive import ParetoArchive
 from src.model.population import Population
@@ -30,6 +30,7 @@ class CRMode(BaseOptimizer):
         self.cr_mode_search_seconds = 0.0
         self.online_optimization_seconds = 0.0
         self.total_end_to_end_seconds = 0.0
+        self.max_repair_iter = configured_max_repair_iter(ctx)
 
     def initialize_population(self):
         mapping = self.ctx.index_mapping
@@ -59,7 +60,11 @@ class CRMode(BaseOptimizer):
     def evaluate_population(self):
         solutions = []
         for index, individual in enumerate(self.population.individuals):
-            solution, repaired = evaluate_individual(individual, self.ctx)
+            solution, repaired = evaluate_individual(
+                individual,
+                self.ctx,
+                max_repair_iter=self.max_repair_iter,
+            )
             if repaired is not None:
                 individual = repaired
                 self.population.individuals[index] = individual
@@ -67,6 +72,7 @@ class CRMode(BaseOptimizer):
             solutions.append(solution)
             self.evaluation_count += 1
         self.population.solutions = solutions
+        self._record_boost_statistics(solutions)
 
     def run(self):
         total_start = time.time()
@@ -91,6 +97,7 @@ class CRMode(BaseOptimizer):
             result = self.executor.execute(self.population, action)
             self.population = result.population
             self.evaluation_count += result.evaluations
+            self._record_boost_statistics(result.trial_solutions)
             self._on_trials_evaluated(result.evaluations)
             self.archive.update(result.trial_solutions)
             self._record_convergence(generation)

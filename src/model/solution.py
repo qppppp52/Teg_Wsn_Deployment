@@ -1,4 +1,6 @@
-"""完整部署解对象"""
+"""Complete physical deployment solution."""
+import copy
+
 import numpy as np
 
 
@@ -8,8 +10,8 @@ class Solution:
         self.y = np.zeros(num_candidates, dtype=np.int8)
         self.c = np.zeros((num_candidates, num_candidates), dtype=np.int8)
         self.p_tx = np.zeros((num_candidates, num_candidates))
-        self.n_sink_sensor = np.zeros(num_candidates, dtype=int)
-        self.n_sink_ap = np.zeros(num_candidates, dtype=int)
+        self.n_sink_sensor = np.zeros(num_candidates, dtype=np.int32)
+        self.n_sink_ap = np.zeros(num_candidates, dtype=np.int32)
         self.z_sink_sensor = [[] for _ in range(num_candidates)]
         self.z_sink_ap = [[] for _ in range(num_candidates)]
         self.sensor_power_consumption = np.zeros(num_candidates)
@@ -24,6 +26,9 @@ class Solution:
         self.cv_link = 0.0
         self.cv_capacity = 0.0
         self.cv_sink = 0.0
+        self.cv_sink_conflict = 0.0
+        self.cv_sink_shortage = 0.0
+        self.cv_sink_invalid = 0.0
         self.cv_service = 0.0
         self.feasible = False
         self.cv_before_repair = float("inf")
@@ -45,8 +50,8 @@ class Solution:
         new.p_tx = self.p_tx.copy()
         new.n_sink_sensor = self.n_sink_sensor.copy()
         new.n_sink_ap = self.n_sink_ap.copy()
-        new.z_sink_sensor = [list(z) for z in self.z_sink_sensor]
-        new.z_sink_ap = [list(z) for z in self.z_sink_ap]
+        new.z_sink_sensor = [list(positions) for positions in self.z_sink_sensor]
+        new.z_sink_ap = [list(positions) for positions in self.z_sink_ap]
         new.sensor_power_consumption = self.sensor_power_consumption.copy()
         new.ap_power_consumption = self.ap_power_consumption.copy()
         new.sensor_harvest_power = self.sensor_harvest_power.copy()
@@ -59,6 +64,9 @@ class Solution:
         new.cv_link = self.cv_link
         new.cv_capacity = self.cv_capacity
         new.cv_sink = self.cv_sink
+        new.cv_sink_conflict = self.cv_sink_conflict
+        new.cv_sink_shortage = self.cv_sink_shortage
+        new.cv_sink_invalid = self.cv_sink_invalid
         new.cv_service = self.cv_service
         new.feasible = self.feasible
         new.cv_before_repair = self.cv_before_repair
@@ -70,5 +78,5 @@ class Solution:
         new.repair_strategy = self.repair_strategy
         new.repair_order = list(self.repair_order)
         new.objectives = self.objectives.copy()
-        new.metadata = dict(self.metadata)
+        new.metadata = copy.deepcopy(self.metadata)
         return new

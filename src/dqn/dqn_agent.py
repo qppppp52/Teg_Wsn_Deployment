@@ -8,11 +8,18 @@ import random
 import numpy as np
 
 from src.dqn.action_space import ACTIONS
+from src.decoder.power_decoder import INITIAL_POWER_SEMANTICS_VERSION
+from src.heatsink.sink_ownership import SINK_OWNERSHIP_SEMANTICS_VERSION
+from src.power.power_repair import POWER_REPAIR_SEMANTICS_VERSION
+from src.power.throughput_enhancer import THROUGHPUT_ENHANCER_VERSION
 from src.dqn.config import DQNConfig
 from src.dqn.replay_buffer import ReplayBuffer
 from src.dqn.q_network import QNetwork, torch
 from src.dqn.state_builder import STATE_KEYS
 from src.dqn.state_normalizer import RunningNormalizer, RunningScalarNormalizer
+
+CHECKPOINT_SCHEMA_VERSION = 4
+POLICY_CONTRACT_VERSION = 3
 
 
 class DQNAgent:
@@ -99,8 +106,8 @@ class DQNAgent:
         self.state_normalizer.update(state)
         if done:
             self.state_normalizer.update(next_state)
-        self.reward_normalizer.update(reward)
         clipped = float(np.clip(reward, *self.config.reward_clip))
+        self.reward_normalizer.update(clipped)
         self.replay.add(
             state,
             action,
@@ -177,19 +184,54 @@ class DQNAgent:
             raise ValueError("action_mask must allow at least one action")
         return mask
 
-    def save(self, path):
-        directory = os.path.dirname(path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
+    def parameter_hash(self):
+        digest = hashlib.sha256()
+        for name, tensor in sorted(self.q_net.state_dict().items()):
+            digest.update(name.encode("utf-8"))
+            digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+        return digest.hexdigest()
+
+    def _checkpoint_metadata(self):
         metadata = {
-            "schema_version": 2,
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "policy_contract_version": POLICY_CONTRACT_VERSION,
             "state_keys": list(STATE_KEYS),
             "action_names": [action["name"] for action in ACTIONS],
+            "action_definitions": ACTIONS,
             "hidden_dims": list(self.hidden_dims),
+            "gamma": self.config.gamma,
+            "state_normalization": {
+                "enabled": self.config.state_normalization,
+                "warmup_steps": self.config.state_warmup_steps,
+                "clip": self.config.state_clip,
+            },
+            "reward": {
+                "clip": list(self.config.reward_clip),
+                "normalize": self.config.reward_normalization,
+                "warmup_steps": self.config.reward_warmup_steps,
+            },
+            "action_mask": {
+                "enabled": self.config.action_mask_enabled,
+                "thresholds": self.config.mask_thresholds,
+            },
+        }
+        metadata["physics_contract"] = {
+            "throughput_enhancer_version": THROUGHPUT_ENHANCER_VERSION,
+            "heatsink_ownership_semantics_version": SINK_OWNERSHIP_SEMANTICS_VERSION,
+            "initial_power_semantics_version": INITIAL_POWER_SEMANTICS_VERSION,
+            "power_repair_semantics_version": POWER_REPAIR_SEMANTICS_VERSION,
+            "environment": self.config.environment_contract,
         }
         metadata["config_hash"] = hashlib.sha256(
             json.dumps(metadata, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        return metadata
+
+    def save(self, path):
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        metadata = self._checkpoint_metadata()
         torch.save({
             "state_dim": self.state_dim,
             "action_dim": self.action_dim,
@@ -228,6 +270,14 @@ class DQNAgent:
         self.reward_normalizer.freeze()
 
     def _validate_checkpoint(self, checkpoint):
+        metadata = checkpoint.get("metadata")
+        if not isinstance(metadata, dict) or metadata.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+            raise ValueError("DQN checkpoint schema is obsolete; retrain the DQN controller")
+        if metadata.get("policy_contract_version") != POLICY_CONTRACT_VERSION:
+            raise ValueError("DQN checkpoint policy contract version is obsolete")
+        expected_metadata = self._checkpoint_metadata()
+        if metadata.get("config_hash") != expected_metadata["config_hash"]:
+            raise ValueError("DQN checkpoint policy contract is incompatible")
         if int(checkpoint.get("state_dim", -1)) != self.state_dim:
             raise ValueError("DQN checkpoint state_dim is incompatible")
         if int(checkpoint.get("action_dim", -1)) != self.action_dim:

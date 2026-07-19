@@ -9,6 +9,5 @@ mode:
   max_generations: 100
   mutation_strategy: standard_rand
   population_size: 80
-  power_strategy: energy_balanced
   repair_strategy: balanced
 
