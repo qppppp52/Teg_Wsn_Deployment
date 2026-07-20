@@ -8,6 +8,7 @@ from src.evaluator.individual_evaluator import evaluate_individual, configured_m
 from src.model.population import Population
 from src.operators.mode_crossover import crossover
 from src.operators.mode_mutation import mutate, select_pareto_guide
+from src.evaluation.constrained_dominance import constrained_dominates as report_constrained_dominates
 
 
 @dataclass(frozen=True)
@@ -89,13 +90,7 @@ def environmental_select(individuals, solutions, size: int):
 
 
 def constrained_dominates(a, b) -> bool:
-    if a.feasible != b.feasible:
-        return bool(a.feasible)
-    if not a.feasible:
-        return float(a.cv) < float(b.cv) - 1.0e-12
-    no_worse = a.coverage >= b.coverage and a.rsum_capacity >= b.rsum_capacity
-    strictly_better = a.coverage > b.coverage or a.rsum_capacity > b.rsum_capacity
-    return bool(no_worse and strictly_better)
+    return report_constrained_dominates(a, b)
 
 
 def _fast_non_dominated_sort(solutions):

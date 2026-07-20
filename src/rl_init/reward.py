@@ -24,11 +24,11 @@ def compute_step_reward(prev_summary: dict, new_summary: dict, info: dict, rewar
     return float(reward)
 
 
-def normalize_rsum(rsum: float, norm_cfg: dict) -> float:
+def normalize_rsum_capacity(rsum_capacity: float, norm_cfg: dict) -> float:
     rsum_min = float(norm_cfg.get("rsum_ref_min", 0.0))
     rsum_max = float(norm_cfg.get("rsum_ref_max", 1.0))
     denom = max(rsum_max - rsum_min, 1.0e-12)
-    value = (float(rsum) - rsum_min) / denom
+    value = (float(rsum_capacity) - rsum_min) / denom
     return float(np.clip(value, 0.0, 1.0))
 
 
@@ -40,8 +40,7 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
         max_repair_iter=int(env.cfg.get("max_repair_iter", env.ctx.config.get("constraints", {}).get("max_repair_iter", 5))),
     )
     coverage = float(getattr(solution, "coverage", 0.0))
-    rsum_capacity = float(solution.metadata.get("rsum_capacity", getattr(solution, "rsum_capacity", 0.0)))
-    rsum = rsum_capacity
+    rsum_capacity = float(solution.rsum_capacity)
     cv = float(getattr(solution, "cv", 0.0))
     cv_ref = max(float(norm_cfg.get("cv_ref", 10.0)), 1.0e-12)
     repair_iter = float(getattr(solution, "repair_iter", 0.0))
@@ -53,8 +52,8 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
 
     reward = 0.0
     reward += float(reward_cfg.get("coverage", 0.25)) * coverage
-    rsum_norm = normalize_rsum(rsum, norm_cfg)
-    reward += float(reward_cfg.get("rsum", 0.25)) * rsum_norm
+    rsum_norm = normalize_rsum_capacity(rsum_capacity, norm_cfg)
+    reward += float(reward_cfg.get("rsum_capacity", 0.25)) * rsum_norm
     reward += float(reward_cfg.get("feasible_bonus", 0.30)) * (1.0 if feasible else 0.0)
     reward -= float(reward_cfg.get("cv_penalty", 0.35)) * min(cv / cv_ref, 1.0)
     reward -= float(reward_cfg.get("repair_cost_penalty", 0.10)) * min(repair_iter / repair_ref, 1.0)
@@ -64,7 +63,6 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
 
     metrics = {
         "coverage": coverage,
-        "rsum": rsum,
         "rsum_capacity": rsum_capacity,
         "rsum_norm": rsum_norm,
         "rsum_ref_min": float(norm_cfg.get("rsum_ref_min", 0.0)),
@@ -75,7 +73,9 @@ def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[floa
         "repair_success": bool(getattr(solution, "repair_success", feasible)),
         "cv_deploy": float(getattr(solution, "cv_deploy", 0.0)),
         "cv_link": float(getattr(solution, "cv_link", 0.0)),
-        "cv_capacity": float(getattr(solution, "cv_capacity", 0.0)),
+        "cv_power": float(getattr(solution, "cv_power", 0.0)),
+        "cv_energy_sensor": float(getattr(solution, "cv_energy_sensor", 0.0)),
+        "cv_energy_ap": float(getattr(solution, "cv_energy_ap", 0.0)),
         "cv_energy": float(getattr(solution, "cv_energy", 0.0)),
         "cv_sink": float(getattr(solution, "cv_sink", 0.0)),
         "cv_service": float(getattr(solution, "cv_service", 0.0)),

@@ -1,7 +1,7 @@
 import math
 from types import SimpleNamespace
 
-from src.rl_init.init_evaluator import quality_score, get_selected_rsum
+from src.rl_init.init_evaluator import quality_score, get_selected_rsum_capacity
 
 
 class FakeSolution:
@@ -20,14 +20,14 @@ def _cfg():
     }
 
 
-def test_quality_score_uses_capacity_metric_even_with_legacy_config():
+def test_quality_score_uses_rsum_capacity_metric():
     sol = FakeSolution(capacity=80.0)
-    assert get_selected_rsum(sol, _cfg()) == 80.0
+    assert get_selected_rsum_capacity(sol) == 80.0
     assert math.isclose(quality_score(sol, _cfg()), 0.30 * 0.5 + 0.30 * 0.8 + 0.25)
 
 
 def test_quality_score_uses_capacity_metric_and_distinguishes_solutions():
     low = FakeSolution(capacity=30.0)
     high = FakeSolution(capacity=90.0)
-    assert get_selected_rsum(high, _cfg()) == 90.0
+    assert get_selected_rsum_capacity(high) == 90.0
     assert quality_score(high, _cfg()) > quality_score(low, _cfg())

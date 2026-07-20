@@ -8,7 +8,7 @@ from tests.rl_init_test_utils import make_dummy_ctx
 
 
 def test_dqn_action_mask_falls_back_when_everything_would_be_blocked():
-    tiny_actions = [{"id": 0, "name": "rsum_capacity_priority"}]
+    tiny_actions = [{"id": 0, "name": "rsum_search_priority"}]
     mask = build_dqn_action_mask({"FR": 0.0, "CV_mean": 10.0}, tiny_actions, {"dqn": {"action_mask": {"enabled": True, "thresholds": {}}}})
     assert mask.shape == (1,)
     assert bool(mask[0])

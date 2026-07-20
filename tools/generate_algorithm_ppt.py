@@ -236,8 +236,8 @@ def make_dqn_action_chart():
     path = RESULT_ROOT / "dqn_action_reward_summary.csv"
     rows = list(csv.DictReader(path.open(encoding="utf-8")))
     names = ["balanced", "exploration_high_F", "exploitation_low_F", "energy_first",
-             "link_first", "ap_load_first", "sink_first", "rsum_capacity_priority",
-             "diversity_boost", "conservative_repair"]
+             "link_first", "sink_first", "rsum_search_priority", "diversity_boost",
+             "conservative_repair"]
     counts = {name: [] for name in names}
     seeds = []
     for row in rows:
@@ -554,7 +554,7 @@ def build_presentation(output_path: Path):
         ["1 exploration_high_F", "0.80", "0.90", "rand/1", "标准修复", "balanced"],
         ["2 exploitation_low_F", "0.35", "0.60", "current-to-best/1", "标准修复", "balanced"],
         ["3 energy_first", "0.45", "0.70", "rand/1", "energy→sink→link…", "conservative"],
-        ["4 link_first", "0.55", "0.80", "rand/1", "link→capacity→energy…", "balanced"],
+        ["4 link_first", "0.55", "0.80", "rand/1", "link→energy→sink…", "report-backed"],
     ]
     add_table(slide, ["动作", "F", "CR", "变异", "修复顺序", "功率策略"], rows,
               42, 118, 876, 300, widths=[190, 55, 55, 145, 270, 150], font_size=11)
@@ -565,11 +565,10 @@ def build_presentation(output_path: Path):
     # 14 DQN actions 5-9
     slide = new_slide(pres, "DQN 动作空间（2/2）：容量、散热、多样性与保守修复", section="DQN")
     rows = [
-        ["5 ap_load_first", "0.50", "0.75", "rand/1", "capacity→link→energy…", "balanced"],
-        ["6 sink_first", "0.45", "0.65", "rand/1", "sink→energy→link…", "sink_limited"],
-        ["7 rsum_capacity_priority", "0.60", "0.85", "best/1", "link→capacity→energy…", "Rsum priority"],
-        ["8 diversity_boost", "0.90", "0.95", "rand/2", "标准修复", "balanced"],
-        ["9 conservative_repair", "0.30", "0.50", "current-to-best/1", "energy→capacity→link…", "conservative"],
+        ["5 sink_first", "0.45", "0.65", "rand/1", "sink→energy→link…", "report-backed"],
+        ["6 rsum_search_priority", "0.60", "0.85", "best/1", "link→energy→sink…", "Rsum priority"],
+        ["7 diversity_boost", "0.90", "0.95", "rand/2", "标准修复", "report-backed"],
+        ["8 conservative_repair", "0.30", "0.50", "current-to-best/1", "energy→sink→link…", "conservative"],
     ]
     add_table(slide, ["动作", "F", "CR", "变异", "修复顺序", "功率策略"], rows,
               42, 118, 876, 300, widths=[190, 55, 55, 145, 270, 150], font_size=11)
@@ -584,8 +583,8 @@ def build_presentation(output_path: Path):
         ["低可行率/高 CV", "energy_first / conservative / link_first", "优先消除主导约束"],
         ["已经可行但 HV 停滞", "exploration_high_F / diversity_boost", "扩大搜索半径，跳出局部区域"],
         ["前沿稳定、需要精修", "exploitation_low_F", "向当前优秀解附近收敛"],
-        ["容量或链路压力高", "ap_load_first / link_first", "先修复服务与连接瓶颈"],
-        ["希望提高吞吐极值", "rsum_capacity_priority", "best/1 + 容量优先功率策略"],
+        ["链路或能量压力高", "link_first / energy_first", "先修复真实链路与能量瓶颈"],
+        ["希望提高吞吐极值", "rsum_search_priority", "best/1 + rsum_capacity 增量搜索"],
     ]
     add_table(slide, ["状态特征", "候选动作", "为什么"], rows, 55, 120, 850, 300,
               widths=[230, 330, 290], font_size=12)

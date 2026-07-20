@@ -1,42 +1,28 @@
-"""Heatsink constraints from one effective-ownership interpretation."""
+"""Sink-hard predicates and diagnostic shortages from the unified report."""
 from __future__ import annotations
 
-from src.heatsink.sink_ownership import build_sink_ownership
+from src.constraints.constraint_report import evaluate_constraints
 
 
 def heatsink_constraint_components(solution, ctx):
-    ownership = build_sink_ownership(solution, ctx)
-    duplicate_cv = float(
-        sum(ownership.duplicate_sensor_count)
-        + sum(ownership.duplicate_ap_count)
-    )
-    invalid_cv = float(
-        sum(ownership.invalid_sensor_count)
-        + sum(ownership.invalid_ap_count)
-    )
-    conflict_cv = float(ownership.forbidden_conflict_count)
-    shortage_cv = 0.0
-
-    for sensor_id in range(ctx.num_candidates):
-        if solution.x[sensor_id] == 1:
-            effective = len(ownership.effective_sensor_positions[sensor_id])
-            shortage_cv += max(
-                0, int(solution.n_sink_sensor[sensor_id]) - effective
-            )
-    for ap_id in range(ctx.num_candidates):
-        if solution.y[ap_id] == 1:
-            effective = len(ownership.effective_ap_positions[ap_id])
-            shortage_cv += max(0, int(solution.n_sink_ap[ap_id]) - effective)
-
+    report = evaluate_constraints(solution, ctx)
+    hard = report.raw.sink_hard
+    diagnostics = report.raw.sink_diagnostics
     return {
-        "duplicate_cv": duplicate_cv,
-        "invalid_cv": invalid_cv,
-        "sink_conflict_cv": conflict_cv,
-        "sink_shortage_cv": float(shortage_cv),
-        "total": duplicate_cv + invalid_cv + conflict_cv + float(shortage_cv),
+        "invalid_index_or_type_count": hard.invalid_index_or_type_count,
+        "undeployed_owner_count": hard.undeployed_owner_count,
+        "outside_allowed_neighborhood_count": hard.outside_allowed_neighborhood_count,
+        "illegal_node_overlap_excess": hard.illegal_node_overlap_excess,
+        "duplicate_excess": hard.duplicate_excess,
+        "cross_owner_conflict_excess": hard.cross_owner_conflict_excess,
+        "shortage_sensor": diagnostics.shortage_sensor,
+        "shortage_ap": diagnostics.shortage_ap,
+        "sink_hard": hard.total,
+        "sink_diagnostics_shortage": diagnostics.shortage_sensor + diagnostics.shortage_ap,
+        "total": report.components.sink,
     }
 
 
 def check_heatsink_constraints(solution, ctx):
-    """Return total sink CV without modifying the solution."""
-    return heatsink_constraint_components(solution, ctx)["total"]
+    """Return normalized primary SinkHard CV; shortages remain diagnostics."""
+    return float(heatsink_constraint_components(solution, ctx)["total"])

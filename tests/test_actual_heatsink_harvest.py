@@ -7,6 +7,7 @@ from src.constraints.energy_constraints import (
     check_energy_constraints,
     repair_energy_constraints,
 )
+from src.constraints.constraint_report import evaluate_constraints
 from src.constraints.heatsink_constraints import check_heatsink_constraints
 from src.heatsink.harvest_power import (
     actual_sink_count,
@@ -31,7 +32,6 @@ def _ctx(p_grid=(0.02, 0.03, 0.04, 0.05)):
         config={
             "sensor": {"P_sens": 0.01, "P_proc": 0.005},
             "ap": {
-                "C_max": count,
                 "P_idle": 0.01,
                 "P_proc": 0.005,
                 "P_rx": 0.003,
@@ -73,7 +73,7 @@ def test_forbidden_conflict_harvests_for_neither_owner():
 
     assert sensor_harvest_power(solution, 0, ctx) == 0.0
     assert sensor_harvest_power(solution, 1, ctx) == 0.0
-    assert check_heatsink_constraints(solution, ctx) == pytest.approx(3.0)
+    assert check_heatsink_constraints(solution, ctx) == pytest.approx(1.0 / 12.0)
 
 
 def test_matching_requested_and_actual_sinks_have_zero_energy_and_sink_cv():
@@ -115,20 +115,23 @@ def test_duplicate_sink_grid_is_not_extra_harvest_and_is_a_sink_violation():
     solution.sensor_power_consumption[0] = 0.04
 
     assert sensor_harvest_power(solution, 0, ctx) == pytest.approx(0.04)
-    assert check_heatsink_constraints(solution, ctx) == pytest.approx(1.0)
+    assert check_heatsink_constraints(solution, ctx) == pytest.approx(1.0 / 18.0)
 
 
 def test_actual_shortfall_affects_energy_and_heatsink_constraints():
     ctx = _ctx()
     solution = Solution(ctx.num_candidates)
     solution.x[0] = 1
+    solution.y[3] = 1
+    solution.c[0, 3] = 1
+    solution.p_tx[0, 3] = 0.2
     solution.n_sink_sensor[0] = 5
     solution.z_sink_sensor[0] = [0, 1, 2]
-    solution.sensor_power_consumption[0] = 0.08
 
-    assert check_energy_constraints(solution, ctx) == pytest.approx(1.0)
-    assert solution.sensor_harvest_power[0] == 0.0
-    assert check_heatsink_constraints(solution, ctx) == 2.0
+    report = evaluate_constraints(solution, ctx)
+    assert report.energy_cv.sensor > 0.0
+    assert report.physics.energy.sensor_harvest[0] == pytest.approx(0.06)
+    assert report.raw.sink_diagnostics.shortage_sensor > 0
 
 
 def test_sink_requirement_is_not_truncated_by_static_nmax():

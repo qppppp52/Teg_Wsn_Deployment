@@ -23,8 +23,10 @@ class Solution:
         self.cv = float("inf")
         self.cv_deploy = 0.0
         self.cv_energy = 0.0
+        self.cv_energy_sensor = 0.0
+        self.cv_energy_ap = 0.0
         self.cv_link = 0.0
-        self.cv_capacity = 0.0
+        self.cv_power = 0.0
         self.cv_sink = 0.0
         self.cv_sink_conflict = 0.0
         self.cv_sink_shortage = 0.0
@@ -41,6 +43,9 @@ class Solution:
         self.repair_order = []
         self.objectives = np.zeros(2)
         self.metadata = {}
+        self.state_revision = 0
+        self.constraint_report = None
+        self._physical_fingerprint = None
 
     def copy(self):
         new = Solution(len(self.x))
@@ -61,8 +66,10 @@ class Solution:
         new.cv = self.cv
         new.cv_deploy = self.cv_deploy
         new.cv_energy = self.cv_energy
+        new.cv_energy_sensor = self.cv_energy_sensor
+        new.cv_energy_ap = self.cv_energy_ap
         new.cv_link = self.cv_link
-        new.cv_capacity = self.cv_capacity
+        new.cv_power = self.cv_power
         new.cv_sink = self.cv_sink
         new.cv_sink_conflict = self.cv_sink_conflict
         new.cv_sink_shortage = self.cv_sink_shortage
@@ -79,4 +86,7 @@ class Solution:
         new.repair_order = list(self.repair_order)
         new.objectives = self.objectives.copy()
         new.metadata = copy.deepcopy(self.metadata)
+        new.state_revision = self.state_revision
+        new.constraint_report = self.constraint_report
+        new._physical_fingerprint = self._physical_fingerprint
         return new

@@ -2,24 +2,19 @@
 import copy
 
 import numpy as np
+from src.evaluation.constrained_dominance import compare_constraint_state, constrained_dominates
 
 
 def _dominates(a, b):
-    if a.feasible and not b.feasible:
-        return True
-    if not a.feasible and b.feasible:
-        return False
-    if not a.feasible and not b.feasible:
-        return a.cv < b.cv
-    return (
-        a.coverage >= b.coverage
-        and a.rsum_capacity >= b.rsum_capacity
-        and (a.coverage > b.coverage or a.rsum_capacity > b.rsum_capacity)
-    )
+    return constrained_dominates(a, b)
 
 
 def _equivalent(a, b):
-    if bool(a.feasible) != bool(b.feasible):
+    report_a = getattr(a, "constraint_report", None)
+    report_b = getattr(b, "constraint_report", None)
+    feasible_a = bool(report_a.feasible) if report_a is not None else bool(getattr(a, "feasible", False))
+    feasible_b = bool(report_b.feasible) if report_b is not None else bool(getattr(b, "feasible", False))
+    if feasible_a != feasible_b:
         return False
     same_objectives = (
         abs(float(a.coverage) - float(b.coverage)) < 1.0e-9
@@ -27,7 +22,9 @@ def _equivalent(a, b):
     )
     if not same_objectives:
         return False
-    return bool(a.feasible) or abs(float(a.cv) - float(b.cv)) < 1.0e-12
+    if feasible_a:
+        return True
+    return compare_constraint_state(a, b) == 0
 
 
 def _crowding_distance(objs):

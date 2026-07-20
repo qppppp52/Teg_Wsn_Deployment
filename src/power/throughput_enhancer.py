@@ -7,19 +7,16 @@ import time
 import numpy as np
 
 from src.constraints.constraint_eval import evaluate_all_constraints
+from src.constraints.constraint_report import edge_ptx_max
 from src.constraints.link_constraints import single_valid_connected_ap
 from src.heatsink.harvest_power import refresh_harvest_diagnostics
 from src.heatsink.sink_overlap_rules import SinkOverlapRules
 from src.heatsink.sink_ownership import build_sink_ownership
-from src.heatsink.sink_requirement import compute_sink_requirements, required_sink_count
+from src.heatsink.sink_requirement import compute_sink_requirements
 from src.objectives.objective_eval import evaluate_objectives
 from src.objectives.rsum_capacity_objective import compute_link_capacity
 from src.physics.node_power_model import compute_sensor_consumption
-from src.physics.numerical_tolerances import (
-    CAPACITY_ABS_GAIN_BPS,
-    CAPACITY_REL_TOL,
-    POWER_ABS_TOL,
-)
+from src.physics.numerical_tolerances import POWER_ABS_TOL
 from src.power.power_bounds import max_energy_feasible_ptx
 
 
@@ -81,16 +78,15 @@ def enhance_rsum_capacity_greedily(solution, ctx):
     for _ in range(max_steps):
         ownership = build_sink_ownership(candidate, ctx)
         options = []
-        threshold = max(
-            CAPACITY_ABS_GAIN_BPS,
-            CAPACITY_REL_TOL * max(1.0, abs(candidate.rsum_capacity)),
+        threshold = float(
+            ctx.config.get("objectives", {}).get("rsum_gain_tolerance", 1.0e-12)
         )
         for sensor_id in range(ctx.num_candidates):
             ap_id = single_valid_connected_ap(candidate, sensor_id, ctx)
             if ap_id is None:
                 continue
             current_power = float(candidate.p_tx[sensor_id, ap_id])
-            ptx_max = float(ctx.config.get("channel", {}).get("p_tx_max", 0.5))
+            ptx_max = edge_ptx_max(ctx, sensor_id, ap_id)
             if current_power >= ptx_max - POWER_ABS_TOL:
                 continue
             owned = set(candidate.z_sink_sensor[sensor_id])
@@ -142,11 +138,7 @@ def enhance_rsum_capacity_greedily(solution, ctx):
         old_power = float(candidate.p_tx[sensor_id, ap_id])
         candidate.z_sink_sensor[sensor_id].append(int(grid_id))
         candidate.p_tx[sensor_id, ap_id] = float(upper)
-        consumption = compute_sensor_consumption(sensor_id, upper, ctx.config)
-        candidate.sensor_power_consumption[sensor_id] = consumption
-        candidate.n_sink_sensor[sensor_id] = required_sink_count(
-            consumption, ctx.P_grid[sensor_id]
-        )
+        candidate.sensor_power_consumption[sensor_id] = compute_sensor_consumption(sensor_id, upper, ctx.config)
         step_ownership = build_sink_ownership(candidate, ctx)
         effective_positions = step_ownership.effective_sensor_positions[sensor_id]
         if (
@@ -172,9 +164,9 @@ def enhance_rsum_capacity_greedily(solution, ctx):
         and np.array_equal(candidate.x, initial_x)
         and np.array_equal(candidate.y, initial_y)
         and np.array_equal(candidate.c, initial_c)
-        and abs(candidate.coverage - initial_coverage) <= 1.0e-12
+        and abs(candidate.coverage - initial_coverage) <= float(ctx.config.get("objectives", {}).get("coverage_compare_tolerance", 1.0e-12))
         and np.all(final_ap_counts >= initial_ap_counts)
-        and candidate.rsum_capacity + CAPACITY_ABS_GAIN_BPS >= initial_rsum
+        and candidate.rsum_capacity > initial_rsum + float(ctx.config.get("objectives", {}).get("rsum_gain_tolerance", 1.0e-12))
         and sum(final_ownership.duplicate_sensor_count) == 0
         and sum(final_ownership.duplicate_ap_count) == 0
         and sum(final_ownership.invalid_sensor_count) == 0
@@ -273,8 +265,6 @@ def _physical_signature(solution):
         solution.y,
         solution.c,
         solution.p_tx,
-        solution.n_sink_sensor,
-        solution.n_sink_ap,
     ):
         digest.update(np.ascontiguousarray(array).tobytes())
     for all_positions in (solution.z_sink_sensor, solution.z_sink_ap):

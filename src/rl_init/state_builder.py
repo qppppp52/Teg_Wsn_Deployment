@@ -46,7 +46,7 @@ def build_init_state(env) -> dict:
         min(float(last.get("cv", last.get("CV", 0.0))) / max(cv_ref, 1.0e-12), 1.0),
         1.0 if bool(last.get("feasible", False)) else 0.0,
         float(last.get("coverage", 0.0)),
-        min(float(last.get("rsum", 0.0)) / max(rsum_ref, 1.0e-12), 1.0),
+        min(float(last.get("rsum_capacity", 0.0)) / max(rsum_ref, 1.0e-12), 1.0),
         min(float(last.get("repair_iter", 0.0)) / max(repair_ref, 1.0e-12), 1.0),
     ], dtype=np.float32)
 

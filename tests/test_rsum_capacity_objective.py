@@ -60,9 +60,10 @@ def test_drl_reward_and_quality_score_use_selected_metric(monkeypatch):
     sol.feasible = True
     sol.metadata = {"rsum_capacity": 90.0}
     monkeypatch.setattr(reward_module, "evaluate_individual", lambda *args, **kwargs: (sol, None))
-    reward, metrics = compute_terminal_reward(FakeEnv(), {"rsum": 1.0, "coverage": 0.0, "feasible_bonus": 0.0}, FakeEnv.config["drl_init"]["normalization"])
-    assert metrics["rsum"] == 90.0
-    assert metrics["rsum_norm"] == 0.9
-    assert reward > 0.8
-    assert quality_score(sol, FakeEnv.config) > quality_score(SimpleNamespace(coverage=0.5, rsum_capacity=10.0, cv=0.0, feasible=True, repair_iter=0, metadata={"rsum_capacity": 20.0}), FakeEnv.config)
+    reward, metrics = compute_terminal_reward(FakeEnv(), {"rsum_capacity": 1.0, "coverage": 0.0, "feasible_bonus": 0.0}, FakeEnv.config["drl_init"]["normalization"])
+    assert metrics["rsum_capacity"] == 10.0
+    assert metrics["rsum_norm"] == 0.1
+    assert reward > 0.1
+    high = SimpleNamespace(coverage=0.5, rsum_capacity=20.0, cv=0.0, feasible=True, repair_iter=0, metadata={"rsum_capacity": 1.0})
+    assert quality_score(high, FakeEnv.config) > quality_score(sol, FakeEnv.config)
 

@@ -30,7 +30,6 @@ def repair_loop(individual, ctx, max_iter=5, repair_strategy=None):
     seen = {_solution_signature(sol)}
     strategy_name = _strategy_get(repair_strategy, "name", None)
     repair_order = _strategy_get(repair_strategy, "repair_order", None)
-    power_policy = _strategy_get(repair_strategy, "power_policy", None)
 
     for iter_idx in range(max_iter):
         if repair_strategy is None:
@@ -40,7 +39,6 @@ def repair_loop(individual, ctx, max_iter=5, repair_strategy=None):
                 sol,
                 ctx,
                 repair_order=repair_order,
-                power_policy=power_policy,
                 strategy_name=strategy_name,
             )
         evaluate_all_constraints(sol, ctx)
@@ -67,8 +65,6 @@ def repair_loop(individual, ctx, max_iter=5, repair_strategy=None):
         if signature in seen or no_improvement >= patience:
             break
         seen.add(signature)
-
-    best_sol.repair_iter = sol.repair_iter
     best_sol.repair_success = bool(best_sol.feasible)
     best_sol.repair_strategy = strategy_name
     best_sol.repair_order = list(repair_order or [])
@@ -83,14 +79,27 @@ def repair_loop(individual, ctx, max_iter=5, repair_strategy=None):
 
 
 def _finalize_feasible_solution(solution, ctx):
-    """Apply the same final physical semantics before any algorithm sees metrics."""
+    """Submit only a feasible, deployment-preserving strict Rsum improvement."""
     evaluate_all_constraints(solution, ctx)
     evaluate_objectives(solution, ctx)
     if not solution.feasible:
         return solution
+    baseline = solution.copy()
     finalized = enhance_rsum_capacity_greedily(solution, ctx)
     evaluate_all_constraints(finalized, ctx)
     evaluate_objectives(finalized, ctx)
+    gain_tol = float(ctx.config.get("objectives", {}).get("rsum_gain_tolerance", 1.0e-12))
+    coverage_tol = float(ctx.config.get("objectives", {}).get("coverage_compare_tolerance", 1.0e-12))
+    valid = (
+        finalized.feasible
+        and np.array_equal(finalized.x, baseline.x)
+        and np.array_equal(finalized.y, baseline.y)
+        and np.array_equal(finalized.c, baseline.c)
+        and abs(finalized.coverage - baseline.coverage) <= coverage_tol
+        and finalized.rsum_capacity > baseline.rsum_capacity + gain_tol
+    )
+    if not valid:
+        return baseline
     finalized.metadata["boost_invocations"] = int(
         finalized.metadata.get("boost_invocations", 0)
     ) + 1
@@ -148,8 +157,6 @@ def _solution_signature(solution):
         solution.y.tobytes(),
         solution.c.tobytes(),
         solution.p_tx.tobytes(),
-        solution.n_sink_sensor.tobytes(),
-        solution.n_sink_ap.tobytes(),
         tuple(
             tuple(sorted(int(grid) for grid in positions))
             for positions in solution.z_sink_sensor

@@ -263,7 +263,7 @@ class DRLPriorityInitializer:
     def _reward(self, sol):
         cfg = self.config.get("drl_init", {})
         reward_cfg = cfg.get("reward", {})
-        rsum_capacity = float(sol.metadata.get("rsum_capacity", sol.rsum_capacity))
+        rsum_capacity = float(sol.rsum_capacity)
         ref = float(reward_cfg.get("rsum_capacity_ref", self.config.get("evaluation", {}).get("rsum_ref_max", 2.0e7)))
         ref = max(ref, 1.0)
         rsum_capacity_norm = min(np.log1p(max(rsum_capacity, 0.0)) / np.log1p(ref), 2.0)

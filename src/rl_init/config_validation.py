@@ -18,7 +18,7 @@ TOP_LEVEL_KEYS = {
 }
 
 REWARD_KEYS = {
-    "coverage", "rsum", "feasible_bonus", "cv_penalty", "repair_cost_penalty",
+    "coverage", "rsum_capacity", "feasible_bonus", "cv_penalty", "repair_cost_penalty",
     "diversity_bonus", "invalid_action_penalty", "too_few_nodes_penalty",
     "duplicate_penalty", "coverage_step", "energy_step", "link_step", "sink_risk",
 }

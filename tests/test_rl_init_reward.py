@@ -1,6 +1,6 @@
 import math
 
-from src.rl_init.reward import compute_step_reward, normalize_rsum
+from src.rl_init.reward import compute_step_reward, normalize_rsum_capacity
 
 
 def test_rl_init_step_reward_rewards_estimated_improvement():
@@ -16,14 +16,14 @@ def test_rl_init_step_reward_penalizes_invalid_action():
     reward = compute_step_reward(before, after, {"invalid_action": True}, {"invalid_action_penalty": 0.2})
     assert reward < 0
 
-def test_normalize_rsum_uses_min_max_interval():
+def test_normalize_rsum_capacity_uses_min_max_interval():
     cfg = {"rsum_ref_min": 0.0, "rsum_ref_max": 1.6e8}
-    assert normalize_rsum(0.0, cfg) == 0.0
-    assert math.isclose(normalize_rsum(8.0e7, cfg), 0.5)
-    assert normalize_rsum(1.6e8, cfg) == 1.0
-    assert normalize_rsum(2.0e8, cfg) == 1.0
+    assert normalize_rsum_capacity(0.0, cfg) == 0.0
+    assert math.isclose(normalize_rsum_capacity(8.0e7, cfg), 0.5)
+    assert normalize_rsum_capacity(1.6e8, cfg) == 1.0
+    assert normalize_rsum_capacity(2.0e8, cfg) == 1.0
 
 
-def test_normalize_rsum_does_not_saturate_at_twenty_mbps():
+def test_normalize_rsum_capacity_does_not_saturate_at_twenty_mbps():
     cfg = {"rsum_ref_min": 0.0, "rsum_ref_max": 1.6e8}
-    assert math.isclose(normalize_rsum(2.0e7, cfg), 0.125)
+    assert math.isclose(normalize_rsum_capacity(2.0e7, cfg), 0.125)

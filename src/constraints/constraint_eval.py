@@ -1,43 +1,60 @@
-"""Unified constraint evaluation."""
-from src.constraints.ap_service_constraints import check_ap_service
-from src.constraints.capacity_constraints import check_capacity_constraints
-from src.constraints.deployment_constraints import check_deployment_constraints
-from src.constraints.energy_constraints import check_energy_constraints
-from src.constraints.heatsink_constraints import heatsink_constraint_components
-from src.constraints.link_constraints import check_link_constraints
+"""Unified entry points for the immutable constraint report."""
+from __future__ import annotations
+
+import numpy as np
+
+from src.constraints.constraint_report import (
+    evaluate_constraints,
+    ensure_constraint_spec,
+)
+
+
+def apply_constraint_report(solution, report):
+    """Refresh compatibility caches without making them authoritative."""
+    components = report.components
+    solution.constraint_report = report
+    solution.cv = float(report.cv_total)
+    solution.feasible = bool(report.feasible)
+    solution.cv_deploy = float(components.deploy)
+    solution.cv_link = float(components.link)
+    solution.cv_power = float(components.power)
+    solution.cv_service = float(components.service)
+    solution.cv_sink = float(components.sink)
+    solution.cv_energy = float(components.energy)
+    solution.cv_energy_sensor = float(report.energy_cv.sensor)
+    solution.cv_energy_ap = float(report.energy_cv.ap)
+    solution.cv_sink_conflict = float(report.raw.sink_hard.cross_owner_conflict_excess)
+    solution.cv_sink_shortage = float(
+        report.raw.sink_diagnostics.shortage_sensor
+        + report.raw.sink_diagnostics.shortage_ap
+    )
+    solution.cv_sink_invalid = float(
+        report.raw.sink_hard.invalid_index_or_type_count
+        + report.raw.sink_hard.undeployed_owner_count
+        + report.raw.sink_hard.outside_allowed_neighborhood_count
+        + report.raw.sink_hard.illegal_node_overlap_excess
+        + report.raw.sink_hard.duplicate_excess
+    )
+
+    consumption = report.physics.consumption
+    requirements = report.physics.sink_requirement
+    energy = report.physics.energy
+    solution.sensor_power_consumption[:] = np.asarray(consumption.sensor, dtype=float)
+    solution.ap_power_consumption[:] = np.asarray(consumption.ap, dtype=float)
+    solution.n_sink_sensor[:] = np.asarray(requirements.required_sensor, dtype=np.int32)
+    solution.n_sink_ap[:] = np.asarray(requirements.required_ap, dtype=np.int32)
+    solution.sensor_harvest_power[:] = np.asarray(energy.sensor_harvest, dtype=float)
+    solution.ap_harvest_power[:] = np.asarray(energy.ap_harvest, dtype=float)
+    return solution
+
+
+def evaluate_report(solution, ctx):
+    """Pure evaluator used by new code."""
+    return evaluate_constraints(solution, ctx)
 
 
 def evaluate_all_constraints(solution, ctx):
-    config = ctx.config.get("constraints", {})
-    weights = config.get("cv_weights", {})
-    cv_deploy = check_deployment_constraints(solution, ctx)
-    cv_link = check_link_constraints(solution, ctx)
-    cv_capacity = check_capacity_constraints(solution, ctx)
-    cv_energy = check_energy_constraints(solution, ctx)
-    sink_components = heatsink_constraint_components(solution, ctx)
-    cv_sink = sink_components["total"]
-    cv_service = check_ap_service(solution, ctx)
-
-    total = (
-        weights.get("deploy", 1.0) * cv_deploy
-        + weights.get("link", 1.0) * cv_link
-        + weights.get("capacity", 1.0) * cv_capacity
-        + weights.get("energy", 1.0) * cv_energy
-        + weights.get("sink", 1.0) * cv_sink
-        + weights.get("service", 1.0) * cv_service
-    )
-    solution.cv_deploy = cv_deploy
-    solution.cv_energy = cv_energy
-    solution.cv_link = cv_link
-    solution.cv_capacity = cv_capacity
-    solution.cv_sink = cv_sink
-    solution.cv_sink_conflict = sink_components["sink_conflict_cv"]
-    solution.cv_sink_shortage = sink_components["sink_shortage_cv"]
-    solution.cv_sink_invalid = (
-        sink_components["invalid_cv"] + sink_components["duplicate_cv"]
-    )
-    solution.cv_service = cv_service
-    solution.cv = float(total)
-    feasible_tol = float(config.get("feasible_tol", 1.0e-8))
-    solution.feasible = bool(total <= feasible_tol)
-    return solution.cv
+    """Evaluate once, refresh legacy scalar caches, and return total CV."""
+    report = evaluate_report(solution, ctx)
+    apply_constraint_report(solution, report)
+    return float(report.cv_total)

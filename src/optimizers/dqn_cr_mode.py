@@ -318,7 +318,7 @@ class DQNCRMode(BaseOptimizer):
         else:
             pressure = {
                 key: 0.0
-                for key in ["deploy", "link", "capacity", "energy", "sink", "service", "total"]
+                for key in ["deploy", "link", "power", "energy", "sink", "service", "total"]
             }
         rsum_max = float(self.config.get("evaluation", {}).get("rsum_ref_max", 2.0e8))
         best_rsum_capacity = max(
@@ -332,6 +332,8 @@ class DQNCRMode(BaseOptimizer):
             "best_coverage": max([solution.coverage for solution in feasible], default=0.0),
             "best_rsum_capacity": best_rsum_capacity,
             "best_rsum_norm": best_rsum_capacity / max(rsum_max, 1.0),
+            "energy_cv_sensor": float(np.mean([solution.cv_energy_sensor for solution in solutions])) if solutions else 0.0,
+            "energy_cv_ap": float(np.mean([solution.cv_energy_ap for solution in solutions])) if solutions else 0.0,
             "diversity": objective_space_diversity(solutions),
             "pressure": pressure,
             "mean_repair_iter": float(np.mean([

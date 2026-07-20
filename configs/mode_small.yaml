@@ -16,3 +16,6 @@ evaluation:
   rsum_ref_min: 0.0
   rsum_ref_max: 2.0e+8
   hv_reference: [0.0, 0.0]
+objectives:
+  rsum_gain_tolerance: 1.0e-12
+  coverage_compare_tolerance: 1.0e-12

@@ -3,11 +3,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from src.constraints.energy_constraints import check_energy_constraints
+from src.constraints.constraint_report import evaluate_constraints
 from src.decoder.connection_decoder import assign_connections
 from src.heatsink.sink_allocator import rebuild_minimum_sink_allocation
 from src.heatsink.sink_ownership import build_sink_ownership
-from src.heatsink.sink_requirement import InvalidHarvestPower
 from src.io.result_io import save_pareto
 from src.model.pareto_archive import ParetoArchive
 from src.model.solution import Solution
@@ -39,7 +38,7 @@ def test_initial_connection_rejects_power_above_channel_limit_and_ties_by_id():
             [[0.0, 0.6, 0.1], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
         ),
         link_feasible_matrix=np.ones((3, 3), dtype=np.int8),
-        config={"ap": {"C_max": 2}, "channel": {"p_tx_max": 0.5}},
+        config={"channel": {"p_tx_max": 0.5}},
     )
     x = np.asarray([1, 0, 0], dtype=np.int8)
     y = np.asarray([0, 1, 1], dtype=np.int8)
@@ -127,8 +126,9 @@ def test_energy_check_rejects_nonpositive_harvest_power():
     solution = Solution(1)
     solution.x[0] = 1
 
-    with pytest.raises(InvalidHarvestPower):
-        check_energy_constraints(solution, ctx)
+    report = evaluate_constraints(solution, ctx)
+    assert report.energy_cv.sensor > 0.0
+    assert report.physics.sink_requirement.unachievable_sensor == (True,)
 
 
 def test_ppo_checkpoint_hash_covers_physical_channel_semantics():

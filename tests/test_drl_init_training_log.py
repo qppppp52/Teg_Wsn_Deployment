@@ -8,7 +8,7 @@ from src.io.config_reader import load_experiment_config
 
 REQUIRED_COLUMNS = {
     "episode", "episode_steps", "total_reward", "step_reward_sum", "terminal_reward",
-    "feasible", "cv", "cv_deploy", "cv_link", "cv_capacity", "cv_energy", "cv_sink",
+    "feasible", "cv", "cv_deploy", "cv_link", "cv_power", "cv_energy", "cv_energy_sensor", "cv_energy_ap", "cv_sink",
     "cv_service", "coverage", "rsum_capacity", "repair_iter",
     "repair_success", "num_sensors", "num_aps", "invalid_action_count", "policy_loss",
     "value_loss", "entropy", "approx_kl", "loaded_checkpoint", "policy_source", "torch_available",

@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from src.heatsink.sink_overlap_rules import SinkOverlapRules
+from src.constraints.constraint_report import mark_physical_state_dirty
 
 
 def rebuild_minimum_sink_allocation(solution, ctx):
     """Clear stale placements and allocate only the current minimum demand."""
     rules = SinkOverlapRules(ctx.config)
     K = int(ctx.num_candidates)
+    previous_signature = _sink_position_signature(solution)
     for index in range(K):
         solution.z_sink_sensor[index] = []
         solution.z_sink_ap[index] = []
@@ -49,6 +51,8 @@ def rebuild_minimum_sink_allocation(solution, ctx):
             ),
         )
         _positions(solution, kind, node_id).append(int(grid_id))
+    if _sink_position_signature(solution) != previous_signature:
+        mark_physical_state_dirty(solution)
     return solution
 
 
@@ -99,3 +103,10 @@ def _conflict_degree(grid_id, kind, node_id, nodes, solution, ctx, rules):
 def allocate_all_sinks(solution, ctx):
     """Compatibility entry point for minimum deterministic reconstruction."""
     return rebuild_minimum_sink_allocation(solution, ctx)
+
+
+def _sink_position_signature(solution):
+    return (
+        tuple(tuple(int(grid) for grid in positions) for positions in solution.z_sink_sensor),
+        tuple(tuple(int(grid) for grid in positions) for positions in solution.z_sink_ap),
+    )

@@ -11,6 +11,7 @@ from src.heatsink.neighborhood import compute_neighborhoods
 from src.utils.index_mapping import IndexMapping
 from src.model.problem_context import ProblemContext
 from src.utils.logger import get_logger
+from src.constraints.constraint_report import ensure_constraint_spec
 
 logger = get_logger("preprocessor")
 
@@ -72,6 +73,7 @@ def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
     ctx.index_mapping = idx_map
     ctx.config = config
     ctx.Rs = Rs
+    ensure_constraint_spec(ctx)
     return ctx
 
 

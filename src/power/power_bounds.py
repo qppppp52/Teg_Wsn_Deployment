@@ -1,6 +1,7 @@
 """Energy-safe transmit-power bounds from effective heatsink ownership."""
 from __future__ import annotations
 
+from src.constraints.constraint_report import edge_ptx_max
 from src.heatsink.sink_ownership import build_sink_ownership
 from src.physics.numerical_tolerances import ENERGY_ABS_TOL
 
@@ -15,7 +16,6 @@ def max_energy_feasible_ptx(
     ownership=None,
 ):
     """Return the energy-safe upper bound clipped to the channel power range."""
-    del ap_id
     sensor_id = int(sensor_id)
     ownership = ownership or build_sink_ownership(solution, ctx)
     effective_count = len(ownership.effective_sensor_positions[sensor_id])
@@ -25,7 +25,7 @@ def max_energy_feasible_ptx(
     fixed_consumption = float(sensor_cfg.get("P_sens", 0.01)) + float(
         sensor_cfg.get("P_proc", 0.005)
     )
-    ptx_max = float(ctx.config.get("channel", {}).get("p_tx_max", 0.5))
+    ptx_max = edge_ptx_max(ctx, sensor_id, ap_id)
     energy_upper = harvest - fixed_consumption - ENERGY_ABS_TOL
     return min(ptx_max, max(0.0, energy_upper))
 

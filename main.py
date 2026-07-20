@@ -157,7 +157,7 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None,
     feasible_objectives = archive.get_feasible_objectives()
     if len(feasible_objectives) > 0:
         _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front.png"), algorithm)
-        _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front_capacity.png"), algorithm, metric_key="rsum_capacity", ylabel="Rsum Capacity (Mbps)")
+        _plot_pareto_with_representatives(archive.solutions, representatives, os.path.join(fig_dir, "pareto_front_rsum_capacity.png"), algorithm, metric_key="rsum_capacity", ylabel="Rsum Capacity (Mbps)")
         rec_solution = representatives.get("recommended_compromise")
         if rec_solution is not None:
             try:
@@ -186,7 +186,7 @@ def run_compare_experiment(config):
     experiment_start = datetime.now()
     summaries = []
     histories = {}
-    pareto_by_algorithm = {"capacity": {}}
+    pareto_by_algorithm = {"rsum_capacity": {}}
 
     for algorithm in algorithms:
         for seed in seeds:
@@ -194,8 +194,8 @@ def run_compare_experiment(config):
             config.setdefault("runtime", {})["initial_population_snapshot"] = os.path.join(
                 root, "initial_population", f"seed_{seed}.npz"
             )
-            preprocess_dir = os.path.join(root, "scene_preprocess", "shared")
-            save_preprocess = algorithm == algorithms[0] and seed == seeds[0]
+            preprocess_dir = os.path.join(root, "scene_preprocess", f"seed_{seed}")
+            save_preprocess = algorithm == algorithms[0]
             archive, summary, history = run_experiment(
                 config, algorithm, out_dir, seed,
                 preprocess_output_dir=preprocess_dir,
@@ -203,12 +203,12 @@ def run_compare_experiment(config):
             )
             summaries.append(summary)
             histories[(algorithm, seed)] = history
-            pareto_by_algorithm["capacity"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "rsum_capacity"))
+            pareto_by_algorithm["rsum_capacity"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "rsum_capacity"))
 
     os.makedirs(os.path.join(root, "figures"), exist_ok=True)
     _save_summary_csv(summaries, os.path.join(root, "summary_all_algorithms.csv"))
     _save_recommended_all_csv(summaries, os.path.join(root, "recommended_solutions_all_algorithms.csv"))
-    _plot_pareto_compare(pareto_by_algorithm["capacity"], os.path.join(root, "figures", "pareto_compare_capacity.png"), "Rsum Capacity (Mbps)")
+    _plot_pareto_compare(pareto_by_algorithm["rsum_capacity"], os.path.join(root, "figures", "pareto_compare_rsum_capacity.png"), "Rsum Capacity (Mbps)")
     _plot_history_compare(histories, "HV", os.path.join(root, "figures", "hv_compare_all.png"), "Hypervolume")
     _plot_history_compare(histories, "FR_current", os.path.join(root, "figures", "fr_compare_all.png"), "Feasible Ratio")
     gen0_rows = _build_gen0_compare_rows(histories)
@@ -234,7 +234,7 @@ def run_compare_experiment(config):
         dqn_rows,
     )
     logger.info("summary_all_algorithms.csv generated")
-    logger.info("pareto_compare_capacity.png generated")
+    logger.info("pareto_compare_rsum_capacity.png generated")
 
 
 def _save_convergence_csv(history, path):
@@ -399,7 +399,7 @@ def _plot_pareto_with_representatives(solutions, representatives, out_path, algo
     if not feasible:
         return
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    y_values = [float(s.metadata.get(metric_key, s.rsum_capacity)) if metric_key else float(s.rsum_capacity) for s in feasible]
+    y_values = [float(s.rsum_capacity) for s in feasible]
     objs = np.array([[s.coverage, y / 1e6] for s, y in zip(feasible, y_values)], dtype=float)
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.scatter(objs[:, 0], objs[:, 1], c="#7FB3D5", s=70, edgecolors="#1B4F72", linewidth=1.0, label="Feasible Pareto")
@@ -432,7 +432,7 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
     objs = archive.get_feasible_objectives()
     rec = representatives.get("recommended_compromise")
     best_capacity = _best_metadata_value(feasible, "rsum_capacity")
-    rec_capacity = float(rec.metadata.get("rsum_capacity", rec.rsum_capacity)) if rec is not None else 0.0
+    rec_capacity = float(rec.rsum_capacity) if rec is not None else 0.0
     summary = {
         "algorithm": algorithm,
         "seed": seed,
@@ -564,7 +564,7 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
 def _best_metadata_value(solutions, key):
     if not solutions:
         return 0.0
-    values = [float(s.metadata.get(key, s.rsum_capacity)) for s in solutions]
+    values = [float(s.rsum_capacity) for s in solutions]
     return float(max(values)) if values else 0.0
 
 
@@ -953,7 +953,7 @@ def _feasible_metric_points(solutions, metadata_key):
     if not feasible:
         return np.zeros((0, 2), dtype=float)
     return np.asarray([
-        [float(s.coverage), float(s.metadata.get(metadata_key, s.rsum_capacity))]
+        [float(s.coverage), float(s.rsum_capacity)]
         for s in feasible
     ], dtype=float)
 

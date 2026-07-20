@@ -1,25 +1,22 @@
-"""Feasibility-only transmit-power capping and downshift."""
+"""Deterministic downward-only transmit-power repair."""
 from __future__ import annotations
 
+import numpy as np
+
 from src.constraints.link_constraints import single_valid_connected_ap
+from src.constraints.constraint_report import edge_ptx_max
+from src.constraints.constraint_report import mark_physical_state_dirty
 from src.heatsink.harvest_power import refresh_harvest_diagnostics
 from src.physics.node_power_model import compute_ap_consumption, compute_sensor_consumption
 from src.physics.numerical_tolerances import POWER_ABS_TOL
 from src.power.power_bounds import max_energy_feasible_ptx
 
 
-POWER_REPAIR_SEMANTICS_VERSION = 2
-_VALID_POLICIES = {"retain_current", "conservative"}
+POWER_REPAIR_SEMANTICS_VERSION = 3
 
 
 def repair_power(solution, ctx):
-    """Apply only feasibility semantics; never raise an established valid power."""
-    policy = getattr(ctx, "current_power_policy", None)
-    if policy is None:
-        policy = solution.metadata.get("power_policy")
-    if policy is None:
-        policy = "retain_current"
-    policy = _normalize_policy(policy)
+    """Retain supported current power and downshift only when energy requires it."""
     previous_power = solution.p_tx.copy()
     solution.p_tx.fill(0.0)
     ownership = refresh_harvest_diagnostics(solution, ctx)
@@ -33,20 +30,15 @@ def repair_power(solution, ctx):
                 else 0.0
             )
             continue
-
         ptx_min = float(ctx.ptx_min_matrix[sensor_id, ap_id])
         current = float(previous_power[sensor_id, ap_id])
-        if current <= POWER_ABS_TOL:
+        if not np.isfinite(current) or current <= POWER_ABS_TOL:
             current = ptx_min
         upper = max_energy_feasible_ptx(
             solution, sensor_id, ap_id, ctx, ownership=ownership
         )
-        if upper + POWER_ABS_TOL < ptx_min:
-            target = ptx_min
-        elif policy == "conservative":
-            target = ptx_min
-        else:
-            target = max(ptx_min, min(current, upper))
+        target = max(ptx_min, min(current, upper))
+        target = min(edge_ptx_max(ctx, sensor_id, ap_id), target)
         solution.p_tx[sensor_id, ap_id] = target
         solution.sensor_power_consumption[sensor_id] = compute_sensor_consumption(
             sensor_id, target, ctx.config
@@ -54,22 +46,14 @@ def repair_power(solution, ctx):
 
     for ap_id in range(ctx.num_candidates):
         if solution.y[ap_id] == 1:
+            connections = int(
+                np.sum((solution.c[:, ap_id] == 1) & (solution.x == 1))
+            )
             solution.ap_power_consumption[ap_id] = compute_ap_consumption(
-                int(solution.c[:, ap_id].sum()), ctx.config
+                connections, ctx.config
             )
         else:
             solution.ap_power_consumption[ap_id] = 0.0
-    return solution
-
-
-def _normalize_policy(policy):
-    aliases = {
-        "balanced": "retain_current",
-        "energy_balanced": "retain_current",
-        "rsum_capacity_priority": "retain_current",
-        "sink_limited": "conservative",
-    }
-    normalized = aliases.get(str(policy), str(policy))
-    if normalized not in _VALID_POLICIES:
-        raise ValueError(f"Unknown power repair policy: {policy}")
-    return normalized
+    if not np.array_equal(previous_power, solution.p_tx):
+        mark_physical_state_dirty(solution)
+    return solution

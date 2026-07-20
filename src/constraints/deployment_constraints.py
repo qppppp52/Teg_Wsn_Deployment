@@ -1,66 +1,78 @@
-"""部署约束：数量上限 + 传感器/AP 互斥 x_r + y_r <= 1"""
+"""Deployment-count and Sensor/AP role-exclusion constraints."""
+from __future__ import annotations
+
 import numpy as np
+
+from src.constraints.constraint_report import mark_physical_state_dirty
 
 
 def check_deployment_constraints(solution, ctx):
-    cv = 0.0
+    """Return the normalized deployment CV from the shared contract."""
     scfg = ctx.config.get("deployment", {})
-    mx_s = scfg.get("max_sensors", 20)
-    mx_a = scfg.get("max_aps", 4)
-    ns = int(np.sum(solution.x))
-    na = int(np.sum(solution.y))
-    if ns > mx_s:
-        cv += ns - mx_s
-    if na > mx_a:
-        cv += na - mx_a
-    cv += float(np.sum(solution.x & solution.y))
-    return cv
+    max_sensors = int(scfg.get("max_sensors", 20))
+    max_aps = int(scfg.get("max_aps", 4))
+    active_sensors = int(np.sum(solution.x == 1))
+    active_aps = int(np.sum(solution.y == 1))
+    overlap = int(np.sum((solution.x == 1) & (solution.y == 1)))
+    sensor_excess = max(0, active_sensors - max_sensors) / max(1, max_sensors)
+    ap_excess = max(0, active_aps - max_aps) / max(1, max_aps)
+    role_overlap = overlap / max(1, int(ctx.num_candidates))
+    return float((sensor_excess + ap_excess + role_overlap) / 3.0)
 
 
 def _sensor_coverage_contribution(gid, ctx):
-    """候选点gid作为传感器的覆盖贡献：能覆盖多少目标点"""
     return int(np.sum(ctx.coverage_matrix[gid]))
 
 
 def _ap_communication_contribution(gid, ctx):
-    """候选点gid作为AP的通信贡献：可达传感器数量 × 平均潜在速率"""
-    n_reachable = int(np.sum(ctx.link_feasible_matrix[:, gid]))
-    if n_reachable == 0:
+    reachable = ctx.link_feasible_matrix[:, gid] == 1
+    count = int(np.sum(reachable))
+    if count == 0:
         return 0.0
-    avg_rate = np.mean(ctx.potential_rate_matrix[:, gid][ctx.link_feasible_matrix[:, gid] == 1])
-    return n_reachable * avg_rate
+    return float(count * np.mean(ctx.potential_rate_matrix[:, gid][reachable]))
 
 
 def repair_deployment(solution, ctx):
-    """修复部署约束"""
+    """Repair deployment maxima and role overlap without AP service-count semantics."""
     scfg = ctx.config.get("deployment", {})
-    mx_s = scfg.get("max_sensors", 20)
-    mx_a = scfg.get("max_aps", 4)
+    max_sensors = int(scfg.get("max_sensors", 20))
+    max_aps = int(scfg.get("max_aps", 4))
+    changed = False
 
-    # 互斥修复：比较传感器覆盖贡献 vs AP通信贡献，保留贡献大者
-    overlap = np.where(solution.x & solution.y)[0]
+    overlap = np.where((solution.x == 1) & (solution.y == 1))[0]
     for gid in overlap:
-        cov_contrib = _sensor_coverage_contribution(gid, ctx)
-        ap_contrib = _ap_communication_contribution(gid, ctx)
-        if cov_contrib >= ap_contrib:
-            solution.y[gid] = 0  # 保留传感器
+        if _sensor_coverage_contribution(int(gid), ctx) >= _ap_communication_contribution(int(gid), ctx):
+            _deactivate_ap(solution, int(gid))
         else:
-            solution.x[gid] = 0  # 保留AP
+            _deactivate_sensor(solution, int(gid))
+        changed = True
 
-    # 传感器数量超限：按覆盖贡献排序，保留高贡献的
-    sids = np.where(solution.x == 1)[0]
-    if len(sids) > mx_s:
-        cc = np.array([_sensor_coverage_contribution(s, ctx) for s in sids])
-        order = np.argsort(cc)
-        remove = sids[order[:len(sids) - mx_s]]
-        for gid in remove:
-            solution.x[gid] = 0
+    sensor_ids = np.where(solution.x == 1)[0]
+    if len(sensor_ids) > max_sensors:
+        scores = np.asarray([_sensor_coverage_contribution(int(gid), ctx) for gid in sensor_ids])
+        for gid in sensor_ids[np.argsort(scores)[: len(sensor_ids) - max_sensors]]:
+            _deactivate_sensor(solution, int(gid))
+            changed = True
 
-    # AP数量超限：按通信贡献排序，保留高贡献的
-    aids = np.where(solution.y == 1)[0]
-    if len(aids) > mx_a:
-        ac = np.array([_ap_communication_contribution(a, ctx) for a in aids])
-        order = np.argsort(ac)
-        remove = aids[order[:len(aids) - mx_a]]
-        for gid in remove:
-            solution.y[gid] = 0
+    ap_ids = np.where(solution.y == 1)[0]
+    if len(ap_ids) > max_aps:
+        scores = np.asarray([_ap_communication_contribution(int(gid), ctx) for gid in ap_ids])
+        for gid in ap_ids[np.argsort(scores)[: len(ap_ids) - max_aps]]:
+            _deactivate_ap(solution, int(gid))
+            changed = True
+
+    if changed:
+        mark_physical_state_dirty(solution)
+    return solution
+
+def _deactivate_sensor(solution, sensor_id):
+    solution.x[sensor_id] = 0
+    solution.c[sensor_id, :] = 0
+    solution.p_tx[sensor_id, :] = 0.0
+    solution.z_sink_sensor[sensor_id] = []
+
+def _deactivate_ap(solution, ap_id):
+    solution.y[ap_id] = 0
+    solution.c[:, ap_id] = 0
+    solution.p_tx[:, ap_id] = 0.0
+    solution.z_sink_ap[ap_id] = []

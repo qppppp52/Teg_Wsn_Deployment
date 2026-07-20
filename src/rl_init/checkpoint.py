@@ -63,9 +63,9 @@ def resolve_checkpoint_path(config: dict, seed: int | None = None) -> str:
         "seed": int(seed if seed is not None else cfg.get("seed", 42)),
     }
     if mode == "shared_pretrain":
-        template = cfg.get("checkpoint_name_template_shared", "drl_init_{scene_name}_capacity_shared.pt")
+        template = cfg.get("checkpoint_name_template_shared", "drl_init_{scene_name}_rsum_capacity_shared.pt")
     else:
-        template = cfg.get("checkpoint_name_template", "drl_init_{scene_name}_capacity_seed_{seed}.pt")
+        template = cfg.get("checkpoint_name_template", "drl_init_{scene_name}_rsum_capacity_seed_{seed}.pt")
     return os.path.join(checkpoint_dir, template.format(**values))
 
 def stable_config_hash(config: dict) -> str:

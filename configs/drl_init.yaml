@@ -44,7 +44,7 @@ drl_init:
 
   reward:
     coverage: 0.25
-    rsum: 0.25
+    rsum_capacity: 0.25
     feasible_bonus: 0.30
     cv_penalty: 0.35
     repair_cost_penalty: 0.10
@@ -81,7 +81,7 @@ drl_init:
   force_retrain: false
   checkpoint_mode: per_seed
   checkpoint_dir: experiments/checkpoints
-  checkpoint_name_template: "drl_init_{scene_name}_capacity_seed_{seed}.pt"
-  checkpoint_name_template_shared: "drl_init_{scene_name}_capacity_shared.pt"
+  checkpoint_name_template: "drl_init_{scene_name}_rsum_capacity_seed_{seed}.pt"
+  checkpoint_name_template_shared: "drl_init_{scene_name}_rsum_capacity_shared.pt"
   save_training_log: true
   save_generated_population: true

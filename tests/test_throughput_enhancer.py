@@ -18,7 +18,6 @@ def _ctx():
         "deployment": {"max_sensors": 2, "max_aps": 2},
         "sensor": {"P_sens": 0.01, "P_proc": 0.005},
         "ap": {
-            "C_max": 2,
             "P_idle": 0.01,
             "P_proc": 0.005,
             "P_rx": 0.003,
@@ -41,7 +40,7 @@ def _ctx():
             "cv_weights": {
                 "deploy": 1.0,
                 "link": 1.0,
-                "capacity": 1.0,
+                "power": 1.0,
                 "energy": 1.0,
                 "sink": 1.0,
                 "service": 1.0,

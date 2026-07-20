@@ -27,3 +27,6 @@ class ProblemContext:
         self.index_mapping = None
         self.config: dict = None
         self.Rs: float = 1.5
+        self.constraint_evaluation_spec = None
+        self.constraint_context_signature = None
+        self.context_revision = 0

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import random
+from types import SimpleNamespace
 import numpy as np
 
 from src.dqn.action_space import ACTIONS
@@ -18,8 +19,8 @@ from src.dqn.q_network import QNetwork, torch
 from src.dqn.state_builder import STATE_KEYS
 from src.dqn.state_normalizer import RunningNormalizer, RunningScalarNormalizer
 
-CHECKPOINT_SCHEMA_VERSION = 4
-POLICY_CONTRACT_VERSION = 3
+CHECKPOINT_SCHEMA_VERSION = 5
+POLICY_CONTRACT_VERSION = 4
 
 
 class DQNAgent:
@@ -192,6 +193,11 @@ class DQNAgent:
         return digest.hexdigest()
 
     def _checkpoint_metadata(self):
+        from src.constraints.constraint_report import ConstraintEvaluationSpec
+
+        spec = ConstraintEvaluationSpec.from_context(
+            SimpleNamespace(config=self.config.environment_contract)
+        )
         metadata = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "policy_contract_version": POLICY_CONTRACT_VERSION,
@@ -206,13 +212,27 @@ class DQNAgent:
                 "clip": self.config.state_clip,
             },
             "reward": {
+                "version": 2,
                 "clip": list(self.config.reward_clip),
                 "normalize": self.config.reward_normalization,
                 "warmup_steps": self.config.reward_warmup_steps,
+                "component_clip": [-1.0, 1.0],
             },
             "action_mask": {
                 "enabled": self.config.action_mask_enabled,
                 "thresholds": self.config.mask_thresholds,
+            },
+            "constraint_evaluation_spec": spec.as_dict(),
+            "context_signature_policy": {
+                "algorithm": "sha256",
+                "array_digest": "dtype_shape_contiguous_bytes",
+                "ordered_collections": "sorted",
+                "invalidation": "mark_context_dirty",
+            },
+            "objective_contract": {
+                "target": "solution.rsum_capacity",
+                "coverage_compare_tolerance": self.config.environment_contract.get("objectives", {}).get("coverage_compare_tolerance", 1.0e-12),
+                "rsum_gain_tolerance": self.config.environment_contract.get("objectives", {}).get("rsum_gain_tolerance", 1.0e-12),
             },
         }
         metadata["physics_contract"] = {
