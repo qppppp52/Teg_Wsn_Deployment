@@ -19,12 +19,19 @@ from src.io.config_reader import load_experiment_config
 from src.scene.scenario_builder import Scenario
 from src.preprocessing.preprocessor import run_preprocessing
 from src.optimizers.cr_mode import CRMode
+from src.optimizers.mode import MODE
 from src.optimizers.dqn_cr_mode import DQNCRMode
 from src.optimizers.drl_init_cr_mode import DRLInitCRMode
 from src.visualization.plot_convergence import plot_convergence, plot_dual_convergence
 from src.visualization.plot_deployment import plot_deployment
 from src.visualization.temperature_plot import export_candidate_temperature, plot_temperature_faces, plot_pgrid_distribution
 from src.io.result_io import RESULT_SCHEMA_VERSION, save_log
+from src.io.semantic_contract import build_semantic_contract, semantic_signature
+from src.constraints.constraint_report import (
+    SINK_DIAGNOSTIC_FIELDS,
+    evaluate_constraints,
+    sink_diagnostic_metrics,
+)
 from src.physics.analytic_temperature import sample_heat_source_ids
 from src.utils.seed import set_seed
 from src.utils.logger import get_logger
@@ -95,6 +102,8 @@ def _save_heat_sources(ctx, seed, path):
 
 
 def _make_optimizer(algorithm, ctx, config):
+    if algorithm == "mode":
+        return MODE(ctx, config)
     if algorithm == "cr_mode":
         return CRMode(ctx, config)
     if algorithm == "dqn_cr_mode":
@@ -124,7 +133,14 @@ def run_experiment(config, algorithm="cr_mode", output_dir="results", seed=None,
     scenario = Scenario(config).build()
     ctx = run_preprocessing(scenario, config, seed)
     ctx.config = config
+    deployment_cfg = config.get("deployment", {})
     logger.info(f"Scenario: {scenario.num_candidates} candidates, {scenario.num_targets} targets")
+    logger.info(
+        "Deployment mode=%s, max_sensors=%s, max_aps=%s",
+        deployment_cfg.get("count_mode", "topk_up_to_max"),
+        deployment_cfg.get("max_sensors", ""),
+        deployment_cfg.get("max_aps", ""),
+    )
 
     start = time.time()
     algo = _make_optimizer(algorithm, ctx, config)
@@ -180,7 +196,8 @@ def run_compare_experiment(config):
     exp = config.get("experiment", {})
     name = exp.get("name", "small_center_heat_compare")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    root = os.path.join("experiments", name, timestamp)
+    semantic_tag = semantic_signature(config)[:12]
+    root = os.path.join("experiments", name, timestamp, f"semantics_{semantic_tag}")
     algorithms = exp.get("algorithms", ["cr_mode"])
     seeds = exp.get("seeds", [42])[: int(exp.get("num_runs", len(exp.get("seeds", [42]))))]
     experiment_start = datetime.now()
@@ -206,11 +223,24 @@ def run_compare_experiment(config):
             pareto_by_algorithm["rsum_capacity"].setdefault(algorithm, []).append(_feasible_metric_points(archive.solutions, "rsum_capacity"))
 
     os.makedirs(os.path.join(root, "figures"), exist_ok=True)
+    _ensure_uniform_semantic_signature(summaries)
     _save_summary_csv(summaries, os.path.join(root, "summary_all_algorithms.csv"))
     _save_recommended_all_csv(summaries, os.path.join(root, "recommended_solutions_all_algorithms.csv"))
     _plot_pareto_compare(pareto_by_algorithm["rsum_capacity"], os.path.join(root, "figures", "pareto_compare_rsum_capacity.png"), "Rsum Capacity (Mbps)")
     _plot_history_compare(histories, "HV", os.path.join(root, "figures", "hv_compare_all.png"), "Hypervolume")
     _plot_history_compare(histories, "FR_current", os.path.join(root, "figures", "fr_compare_all.png"), "Feasible Ratio")
+    _plot_mode_vs_cr_history_compare(
+        histories,
+        "archive_best_coverage",
+        os.path.join(root, "figures", "mode_vs_cr_mode_coverage.png"),
+        "Best Feasible Coverage",
+    )
+    _plot_mode_vs_cr_history_compare(
+        histories,
+        "archive_best_rsum_mbps",
+        os.path.join(root, "figures", "mode_vs_cr_mode_rsum_capacity.png"),
+        "Best Rsum Capacity (Mbps)",
+    )
     gen0_rows = _build_gen0_compare_rows(histories)
     dqn_rows = _build_dqn_action_reward_rows(root, summaries)
     _save_dict_rows(gen0_rows, os.path.join(root, "gen0_initial_population_compare.csv"))
@@ -284,7 +314,7 @@ def _save_pareto_solution_details_csv(solutions, path, ctx):
         "rsum_capacity_after_boost",
         "rsum_capacity_boost_gain",
         "boost_stop_reason",
-    ]
+    ] + list(SINK_DIAGNOSTIC_FIELDS)
     with open(path, "w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
@@ -326,6 +356,7 @@ def _save_pareto_solution_details_csv(solutions, path, ctx):
                     "boost_stop_reason": solution.metadata.get(
                         "boost_stop_reason", ""
                     ),
+                    **sink_diagnostic_metrics(evaluate_constraints(solution, ctx)),
                 }
             )
 
@@ -459,6 +490,13 @@ def _build_summary(algorithm, seed, archive, history, runtime_seconds, config, a
         "rsum_ref_max": _drl_norm_value(config, "rsum_ref_max", 1.0),
         "rsum_reward_normalization": _rsum_reward_normalization_definition(),
         "result_schema_version": RESULT_SCHEMA_VERSION,
+        "semantic_contract": build_semantic_contract(config),
+        "semantic_signature": semantic_signature(config),
+        "deployment_count_mode": config.get("deployment", {}).get(
+            "count_mode", "topk_up_to_max"
+        ),
+        "deployment_max_sensors": int(config.get("deployment", {}).get("max_sensors", 0)),
+        "deployment_max_aps": int(config.get("deployment", {}).get("max_aps", 0)),
         "mode_individual_evaluations": int(getattr(algo, "evaluation_count", 0)),
         "boost_invocations": int(getattr(algo, "boost_invocations", 0)),
         "boost_candidate_evaluations": int(getattr(algo, "boost_candidate_evaluations", 0)),
@@ -583,6 +621,12 @@ def _first_feasible_generation(history):
         if count > 0:
             return idx
     return -1
+
+
+def _ensure_uniform_semantic_signature(summaries):
+    signatures = {str(summary.get("semantic_signature", "")) for summary in summaries}
+    if len(signatures) > 1:
+        raise ValueError("cross-algorithm aggregation cannot mix semantic contracts")
 
 
 def _save_summary_csv(summaries, path):
@@ -1007,6 +1051,44 @@ def _plot_history_compare(histories, key, out_path, ylabel):
     ax.set_title(f"{ylabel} Comparison")
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
+def _plot_mode_vs_cr_history_compare(histories, key, out_path, ylabel):
+    """Plot a seed-aggregated MODE versus CR-MODE convergence comparison."""
+    selected = {"mode", "cr_mode"}
+    grouped = {algorithm: [] for algorithm in selected}
+    for (algorithm, _seed), history in histories.items():
+        values = np.asarray(history.get(key, []), dtype=float)
+        if algorithm in selected and values.size:
+            grouped[algorithm].append(values)
+    if not all(grouped.values()):
+        return
+
+    import matplotlib as mpl
+    mpl.use("Agg")
+    import matplotlib.pyplot as plt
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    colors = {"mode": "#4C78A8", "cr_mode": "#E45756"}
+    labels = {"mode": "MODE", "cr_mode": "CR-MODE"}
+    for algorithm in ("mode", "cr_mode"):
+        length = min(len(series) for series in grouped[algorithm])
+        data = np.vstack([series[:length] for series in grouped[algorithm]])
+        with np.errstate(invalid="ignore"):
+            mean = np.nanmean(data, axis=0)
+            std = np.nanstd(data, axis=0)
+        generation = np.arange(length)
+        ax.plot(generation, mean, label=labels[algorithm], color=colors[algorithm], linewidth=2)
+        ax.fill_between(generation, mean - std, mean + std, color=colors[algorithm], alpha=0.16)
+    ax.set_xlabel("Generation")
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"MODE vs CR-MODE: {ylabel}")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
     fig.tight_layout()
     fig.savefig(out_path, dpi=180)
     plt.close(fig)

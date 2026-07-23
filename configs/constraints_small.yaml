@@ -28,7 +28,7 @@ heatsink:
 
 constraints:
   cv_schema_version: 3
-  semantics_version: 3
+  semantics_version: 4
   comparator_version: 2
   sink_classification_version: 2
   ownership_semantics_version: 2
@@ -47,6 +47,7 @@ constraints:
   energy_compare_tol: 1.0e-12
   cv_compare_tol: 1.0e-8
   max_ap_rebalance_moves: 3
+  max_sensor_energy_reassignments: 1
   ap_service_enabled: true
   cv_normalization:
     enabled: true
@@ -58,15 +59,11 @@ constraints:
     service: 0.1
     power: 0.1
   early_stop_if_cv_not_decrease: true
-  max_repair_iter: 5
-  cv_pressure_refs:
-    deploy: 1.0
-    link: 10.0
-    power: 1.0
-    energy: 1.0
-    sink: 10.0
-    service: 5.0
-    total: 20.0
+  max_outer_repair_rounds: 5
+  max_energy_stabilization_iters: 5
+  repair_patience: 2
+  enable_repair_cycle_detection: true
+  enable_energy_node_deletion_fallback: true
 
 throughput_enhancement:
   enabled: true

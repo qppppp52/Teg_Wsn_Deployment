@@ -7,6 +7,7 @@ import os
 import time
 import numpy as np
 
+from src.constraints.constraint_report import sink_diagnostic_metrics
 from src.model.individual import create_random_individual
 from src.model.population import Population
 from src.rl_init.checkpoint import (
@@ -500,6 +501,8 @@ class DRLInitPopulationGenerator:
                 objective_space_distance(solution, prev["solution"], rsum_scale)
                 for prev in previous
             ]
+            report = getattr(solution, "constraint_report", None)
+            sink_metrics = sink_diagnostic_metrics(report) if report is not None else {}
             rows.append({
                 "individual_id": index,
                 "source_type": item["source_type"],
@@ -515,6 +518,7 @@ class DRLInitPopulationGenerator:
                 "cv_energy_ap": getattr(solution, "cv_energy_ap", 0.0),
                 "cv_energy": getattr(solution, "cv_energy", 0.0),
                 "cv_sink": getattr(solution, "cv_sink", 0.0),
+                **sink_metrics,
                 "cv_service": getattr(solution, "cv_service", 0.0),
                 "coverage": solution.coverage,
                 "rsum_capacity": solution.rsum_capacity,

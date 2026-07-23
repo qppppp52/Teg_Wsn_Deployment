@@ -2,7 +2,11 @@
 import copy
 
 import numpy as np
-from src.evaluation.constrained_dominance import compare_constraint_state, constrained_dominates
+from src.constraints.report_freshness import require_fresh_constraint_report
+from src.evaluation.constrained_dominance import constrained_dominates
+
+
+PARETO_ARCHIVE_SEMANTICS_VERSION = 2
 
 
 def _dominates(a, b):
@@ -10,21 +14,11 @@ def _dominates(a, b):
 
 
 def _equivalent(a, b):
-    report_a = getattr(a, "constraint_report", None)
-    report_b = getattr(b, "constraint_report", None)
-    feasible_a = bool(report_a.feasible) if report_a is not None else bool(getattr(a, "feasible", False))
-    feasible_b = bool(report_b.feasible) if report_b is not None else bool(getattr(b, "feasible", False))
-    if feasible_a != feasible_b:
-        return False
-    same_objectives = (
+    """Archive entries are fresh and feasible, so equality is objective equality."""
+    return (
         abs(float(a.coverage) - float(b.coverage)) < 1.0e-9
         and abs(float(a.rsum_capacity) - float(b.rsum_capacity)) < 1.0e-9
     )
-    if not same_objectives:
-        return False
-    if feasible_a:
-        return True
-    return compare_constraint_state(a, b) == 0
 
 
 def _crowding_distance(objs):
@@ -55,8 +49,9 @@ class ParetoArchive:
         self._prune()
 
     def _insert(self, sol):
-        if not sol.feasible and self._has_any_feasible():
-            return
+        report = require_fresh_constraint_report(sol, "Pareto archive insertion")
+        if not report.feasible:
+            return False
         dominated = False
         to_remove = []
         for i, existing in enumerate(self.solutions):
@@ -69,6 +64,8 @@ class ParetoArchive:
             for i in sorted(to_remove, reverse=True):
                 self.solutions.pop(i)
             self.solutions.append(copy.deepcopy(sol))
+            return True
+        return False
 
     def _prune(self):
         if len(self.solutions) <= self.max_size:
@@ -78,8 +75,6 @@ class ParetoArchive:
         idx = np.argsort(crowding)[::-1]
         self.solutions = [self.solutions[i] for i in idx[: self.max_size]]
 
-    def _has_any_feasible(self):
-        return any(solution.feasible for solution in self.solutions)
 
     def get_objectives(self):
         if not self.solutions:

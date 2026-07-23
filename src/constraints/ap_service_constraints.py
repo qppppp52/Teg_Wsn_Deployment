@@ -3,28 +3,28 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.constraints.constraint_report import mark_physical_state_dirty
+from src.constraints.constraint_report import evaluate_constraints, mark_physical_state_dirty
+from src.constraints.link_constraints import single_valid_connected_ap
 
 
 def check_ap_service(solution, ctx):
-    """Measure the optional non-empty-service rule for deployed APs."""
-    if not bool(ctx.config.get("constraints", {}).get("ap_service_enabled", True)):
-        return 0.0
-    active_aps = max(1, int(np.sum(solution.y == 1)))
-    empty = sum(
-        solution.y[ap_id] == 1 and not np.any((solution.c[:, ap_id] == 1) & (solution.x == 1))
-        for ap_id in range(ctx.num_candidates)
-    )
-    return float(empty / active_aps)
+    """Return the service component from the authoritative physical report."""
+    return float(evaluate_constraints(solution, ctx).components.service)
 
 
 def repair_empty_aps(solution, ctx):
-    """Remove deployed APs with no real sensor connection when enabled."""
+    """Remove deployed APs that have no physically valid Sensor connection."""
     if not bool(ctx.config.get("constraints", {}).get("ap_service_enabled", True)):
         return solution
+    served_ap_ids = {
+        ap_id
+        for sensor_id in np.where(solution.x == 1)[0]
+        if (ap_id := single_valid_connected_ap(solution, int(sensor_id), ctx)) is not None
+    }
     changed = False
     for ap_id in np.where(solution.y == 1)[0]:
-        if np.any((solution.c[:, ap_id] == 1) & (solution.x == 1)):
+        ap_id = int(ap_id)
+        if ap_id in served_ap_ids:
             continue
         solution.y[ap_id] = 0
         solution.c[:, ap_id] = 0

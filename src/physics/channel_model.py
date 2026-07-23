@@ -1,5 +1,6 @@
 """通信信道模型：路径损耗 d^α + K-mu 衰落"""
 import numpy as np
+from src.model.problem_context import resolve_global_ptx_max
 
 
 def compute_distance_matrix(points: np.ndarray) -> np.ndarray:
@@ -69,5 +70,5 @@ def compute_ptx_min(channel_gain: np.ndarray, distance: np.ndarray, config: dict
 
 def compute_link_feasibility(ptx_min: np.ndarray, config: dict) -> np.ndarray:
     """链路可达矩阵 A_ij。1=可行，0=不可行"""
-    ptx_max = float(config.get("channel", {}).get("p_tx_max", 0.5))
+    ptx_max = resolve_global_ptx_max(config)
     return (ptx_min <= ptx_max).astype(int)

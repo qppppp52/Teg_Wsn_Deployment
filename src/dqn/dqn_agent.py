@@ -9,6 +9,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from src.dqn.action_space import ACTIONS
+from src.constraints.energy_constraints import ENERGY_REPAIR_SEMANTICS_VERSION
+from src.io.semantic_contract import build_semantic_contract
 from src.decoder.power_decoder import INITIAL_POWER_SEMANTICS_VERSION
 from src.heatsink.sink_ownership import SINK_OWNERSHIP_SEMANTICS_VERSION
 from src.power.power_repair import POWER_REPAIR_SEMANTICS_VERSION
@@ -18,9 +20,17 @@ from src.dqn.replay_buffer import ReplayBuffer
 from src.dqn.q_network import QNetwork, torch
 from src.dqn.state_builder import STATE_KEYS
 from src.dqn.state_normalizer import RunningNormalizer, RunningScalarNormalizer
+from src.constraints.cv_schema import (
+    ACTION_MASK_SCHEMA_VERSION,
+    CV_COMPONENT_KEYS,
+    CV_COMPONENT_SCHEMA_VERSION,
+    PRESSURE_SCHEMA_VERSION,
+    REWARD_SCHEMA_VERSION,
+    STATE_SCHEMA_VERSION,
+)
 
-CHECKPOINT_SCHEMA_VERSION = 5
-POLICY_CONTRACT_VERSION = 4
+CHECKPOINT_SCHEMA_VERSION = 6
+POLICY_CONTRACT_VERSION = 5
 
 
 class DQNAgent:
@@ -201,6 +211,18 @@ class DQNAgent:
         metadata = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "policy_contract_version": POLICY_CONTRACT_VERSION,
+            "cv_component_schema_version": CV_COMPONENT_SCHEMA_VERSION,
+            "cv_component_keys": list(CV_COMPONENT_KEYS),
+            "pressure_schema_version": PRESSURE_SCHEMA_VERSION,
+            "state_schema_version": STATE_SCHEMA_VERSION,
+            "reward_schema_version": REWARD_SCHEMA_VERSION,
+            "action_mask_schema_version": ACTION_MASK_SCHEMA_VERSION,
+            "pressure_normalization": {
+                "refs": dict(self.config.pressure_refs),
+                "cv_zero_tol": self.config.pressure_cv_zero_tol,
+                "reference_source": self.config.pressure_reference_source,
+                "state_cv_total_ref": self.config.state_cv_total_ref,
+            },
             "state_keys": list(STATE_KEYS),
             "action_names": [action["name"] for action in ACTIONS],
             "action_definitions": ACTIONS,
@@ -212,14 +234,16 @@ class DQNAgent:
                 "clip": self.config.state_clip,
             },
             "reward": {
-                "version": 2,
+                "version": 3,
                 "clip": list(self.config.reward_clip),
+                "pressure_regression_tolerance": self.config.pressure_regression_tolerance,
                 "normalize": self.config.reward_normalization,
                 "warmup_steps": self.config.reward_warmup_steps,
                 "component_clip": [-1.0, 1.0],
             },
             "action_mask": {
                 "enabled": self.config.action_mask_enabled,
+                "schema_version": ACTION_MASK_SCHEMA_VERSION,
                 "thresholds": self.config.mask_thresholds,
             },
             "constraint_evaluation_spec": spec.as_dict(),
@@ -240,6 +264,8 @@ class DQNAgent:
             "heatsink_ownership_semantics_version": SINK_OWNERSHIP_SEMANTICS_VERSION,
             "initial_power_semantics_version": INITIAL_POWER_SEMANTICS_VERSION,
             "power_repair_semantics_version": POWER_REPAIR_SEMANTICS_VERSION,
+            "energy_repair_semantics_version": ENERGY_REPAIR_SEMANTICS_VERSION,
+            "semantic_contract": build_semantic_contract(self.config.environment_contract),
             "environment": self.config.environment_contract,
         }
         metadata["config_hash"] = hashlib.sha256(
@@ -296,6 +322,20 @@ class DQNAgent:
         if metadata.get("policy_contract_version") != POLICY_CONTRACT_VERSION:
             raise ValueError("DQN checkpoint policy contract version is obsolete")
         expected_metadata = self._checkpoint_metadata()
+        schema_fields = (
+            "cv_component_schema_version",
+            "cv_component_keys",
+            "pressure_schema_version",
+            "state_schema_version",
+            "reward_schema_version",
+            "action_mask_schema_version",
+            "pressure_normalization",
+        )
+        for field in schema_fields:
+            if metadata.get(field) != expected_metadata[field]:
+                raise ValueError(
+                    f"DQN checkpoint {field} is incompatible; retrain the DQN controller"
+                )
         if metadata.get("config_hash") != expected_metadata["config_hash"]:
             raise ValueError("DQN checkpoint policy contract is incompatible")
         if int(checkpoint.get("state_dim", -1)) != self.state_dim:

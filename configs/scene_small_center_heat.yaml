@@ -9,6 +9,7 @@ discretization:
   grid_spacing: 0.75
 
 deployment:
+  count_mode: topk_up_to_max
   max_sensors: 10
   max_aps: 2
 

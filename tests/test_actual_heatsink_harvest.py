@@ -7,7 +7,7 @@ from src.constraints.energy_constraints import (
     check_energy_constraints,
     repair_energy_constraints,
 )
-from src.constraints.constraint_report import evaluate_constraints
+from src.constraints.constraint_report import evaluate_constraints, sink_diagnostic_metrics
 from src.constraints.heatsink_constraints import check_heatsink_constraints
 from src.heatsink.harvest_power import (
     actual_sink_count,
@@ -37,7 +37,7 @@ def _ctx(p_grid=(0.02, 0.03, 0.04, 0.05)):
                 "P_rx": 0.003,
             },
             "channel": {"p_tx_max": 0.5},
-            "constraints": {"max_repair_iter": 5},
+            "constraints": {"max_outer_repair_rounds": 5, "max_energy_stabilization_iters": 5},
             "heatsink": {
                 "allow_sink_sink_overlap": False,
                 "allow_sink_on_other_node": False,
@@ -116,6 +116,10 @@ def test_duplicate_sink_grid_is_not_extra_harvest_and_is_a_sink_violation():
 
     assert sensor_harvest_power(solution, 0, ctx) == pytest.approx(0.04)
     assert check_heatsink_constraints(solution, ctx) == pytest.approx(1.0 / 18.0)
+    metrics = sink_diagnostic_metrics(evaluate_constraints(solution, ctx))
+    assert metrics["sink_duplicate_count"] == 1
+    assert metrics["sink_duplicate_cv"] == pytest.approx(1.0 / 3.0)
+    assert metrics["sink_dominant_violation"] == "duplicate"
 
 
 def test_actual_shortfall_affects_energy_and_heatsink_constraints():
@@ -177,8 +181,26 @@ def test_power_repair_uses_minimum_when_actual_harvest_only_supports_it():
     assert solution.p_tx[0, 3] == pytest.approx(ctx.ptx_min_matrix[0, 3])
 
 
-def test_energy_repair_removes_sensor_when_sinks_cannot_support_minimum_power():
+def test_energy_repair_keeps_sensor_when_sinks_cannot_support_minimum_power():
     ctx = _ctx(p_grid=(0.01, 0.20, 0.04, 0.05))
+    ctx.nmax[0] = 1
+    ctx.neighbor_sets[0] = [0]
+    ctx.neighbor_sets[1] = [1]
+    solution = Solution(ctx.num_candidates)
+    solution.x[0] = 1
+    solution.y[1] = 1
+    solution.c[0, 1] = 1
+    solution.p_tx[0, 1] = 0.01
+
+    repair_energy_constraints(solution, ctx)
+
+    assert solution.x[0] == 1
+    assert solution.metadata["energy_repair_variant"] == "baseline_no_energy_node_deletion"
+
+
+def test_energy_repair_deletion_requires_explicit_ablation_flag():
+    ctx = _ctx(p_grid=(0.01, 0.20, 0.04, 0.05))
+    ctx.config["constraints"]["enable_energy_node_deletion_fallback"] = True
     ctx.nmax[0] = 1
     ctx.neighbor_sets[0] = [0]
     ctx.neighbor_sets[1] = [1]
@@ -193,6 +215,7 @@ def test_energy_repair_removes_sensor_when_sinks_cannot_support_minimum_power():
     assert solution.x[0] == 0
     assert not np.any(solution.c[0])
     assert solution.z_sink_sensor[0] == []
+    assert solution.metadata["energy_repair_variant"] == "aggressive_energy_node_deletion"
 
 
 def test_sensor_and_ap_competing_for_grid_use_actual_allocations():

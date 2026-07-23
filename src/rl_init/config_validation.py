@@ -9,7 +9,7 @@ TOP_LEVEL_KEYS = {
     "learning_rate", "max_grad_norm", "population_size", "drl_ratio",
     "heuristic_ratio", "random_ratio", "max_selected_sensors", "max_selected_aps",
     "min_selected_sensors", "min_selected_aps", "allow_stop_action", "action_mode",
-    "role_actions", "max_repair_iter", "reward", "normalization", "network",
+    "role_actions", "reward", "normalization", "network",
     "diversity", "priority_noise_std", "save_checkpoint", "load_checkpoint_if_exists",
     "force_retrain", "checkpoint_mode", "checkpoint_dir", "checkpoint_name_template",
     "checkpoint_name_template_shared", "save_training_log", "save_generated_population",

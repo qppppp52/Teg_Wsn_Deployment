@@ -4,7 +4,7 @@ from src.utils.index_mapping import IndexMapping
 
 
 def make_dummy_ctx():
-    ctx = ProblemContext()
+    ctx = ProblemContext({"channel": {"p_tx_max": 0.5}})
     ctx.num_candidates = 5
     ctx.num_targets = 3
     ctx.candidate_coords = np.array([
@@ -37,6 +37,7 @@ def make_dummy_ctx():
     ctx.ap_mask = ap_mask
     ctx.index_mapping = IndexMapping(ctx.num_candidates, sensor_mask, ap_mask)
     ctx.config = {
+        "channel": {"p_tx_max": 0.5},
         "deployment": {"max_sensors": 3, "max_aps": 1, "min_sensors": 1, "min_aps": 1},
         "temperature": {"source_position": [0.5, 0.5, 0.5]},
         "constraints": {"max_repair_iter": 1},

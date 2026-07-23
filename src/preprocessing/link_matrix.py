@@ -12,13 +12,10 @@ def compute_all_link_matrices(candidate_coords, config, seed):
     link_feasible = compute_link_feasibility(ptx_min, config)
     snr_est = compute_snr(ptx_min, channel_gain, distance, config)
     potential_rate = compute_rate(snr_est, config)
-    ptx_max = config.get("channel", {}).get("p_tx_max", 0.2)
-    optimistic_ptx_up = np.full_like(ptx_min, ptx_max)
     return {
         "distance": distance,
         "channel_gain": channel_gain,
         "ptx_min": ptx_min,
         "link_feasible": link_feasible,
         "potential_rate": potential_rate,
-        "optimistic_ptx_up": optimistic_ptx_up,
     }

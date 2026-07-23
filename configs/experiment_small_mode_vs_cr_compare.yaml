@@ -1,10 +1,8 @@
 experiment:
-  name: small_center_heat_compare
+  name: small_center_heat_mode_vs_cr_compare
   algorithms:
     - mode
     - cr_mode
-    - dqn_cr_mode
-    - drl_init_cr_mode
   seeds: [42, 43, 44]
   num_runs: 3
   objective_direction: maximize
@@ -20,8 +18,6 @@ config_files:
   mode: configs/mode_small.yaml
   channel: configs/channel_small.yaml
   constraints: configs/constraints_small.yaml
-  dqn: configs/dqn.yaml
-  drl_init: configs/drl_init.yaml
 
 report:
   run_pytest_validation: true

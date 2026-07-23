@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import numpy as np
+from src.constraints.constraint_report import (
+    SINK_PRIMARY_VIOLATION_NAMES,
+    sink_diagnostic_metrics,
+)
 from src.evaluation.diversity import objective_space_diversity
 from src.evaluation.hypervolume import hypervolume_2d_max
 
@@ -20,6 +24,12 @@ def make_convergence_history() -> dict:
         "min_link_capacity_bps", "max_link_capacity_bps", "archive_size",
         "pareto_count", "diversity",
     ]
+    for name in SINK_PRIMARY_VIOLATION_NAMES:
+        keys.extend([f"sink_{name}_count_mean", f"sink_{name}_cv_mean"])
+    keys.extend([
+        "sink_shortage_sensor_mean", "sink_shortage_ap_mean",
+        "sink_dominant_violation",
+    ])
     return {key: [] for key in keys}
 
 
@@ -29,6 +39,11 @@ def record_generation(history: dict, population, archive, config: dict) -> dict:
     feasible = [s for s in sols if s.feasible]
     n = max(len(sols), 1)
     fe_objs = archive.get_feasible_objectives()
+    sink_rows = [
+        sink_diagnostic_metrics(solution.constraint_report)
+        for solution in sols
+        if getattr(solution, "constraint_report", None) is not None
+    ]
     eval_cfg = config.get("evaluation", {})
     rsum_ref_max = float(eval_cfg.get("rsum_ref_max", max(float(fe_objs[:, 1].max()), 1.0) if len(fe_objs) else 1.0))
     hv = hypervolume_2d_max(
@@ -73,6 +88,28 @@ def record_generation(history: dict, population, archive, config: dict) -> dict:
         "pareto_count": len(fe_objs),
         "diversity": objective_space_diversity(feasible),
     }
+    for name in SINK_PRIMARY_VIOLATION_NAMES:
+        metric[f"sink_{name}_count_mean"] = _mean(
+            [row[f"sink_{name}_count"] for row in sink_rows]
+        )
+        metric[f"sink_{name}_cv_mean"] = _mean(
+            [row[f"sink_{name}_cv"] for row in sink_rows]
+        )
+    metric["sink_shortage_sensor_mean"] = _mean(
+        [row["sink_shortage_sensor"] for row in sink_rows]
+    )
+    metric["sink_shortage_ap_mean"] = _mean(
+        [row["sink_shortage_ap"] for row in sink_rows]
+    )
+    count_totals = {
+        name: sum(row[f"sink_{name}_count"] for row in sink_rows)
+        for name in SINK_PRIMARY_VIOLATION_NAMES
+    }
+    metric["sink_dominant_violation"] = (
+        max(count_totals, key=count_totals.get)
+        if any(count_totals.values())
+        else "none"
+    )
     for key, value in metric.items():
         history.setdefault(key, []).append(value)
     return metric

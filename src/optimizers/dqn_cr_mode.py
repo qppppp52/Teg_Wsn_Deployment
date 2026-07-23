@@ -6,20 +6,21 @@ import json
 import os
 import numpy as np
 
-from src.optimizers.base_optimizer import BaseOptimizer
-from src.model.population import Population
-from src.model.pareto_archive import ParetoArchive
-from src.evaluator.individual_evaluator import evaluate_individual, configured_max_repair_iter
+from src.constraints.cv_pressure import aggregate_population_pressure
+from src.constraints.cv_schema import CV_COMPONENT_KEYS
+from src.dqn.action_mask import build_dqn_action_mask_details
 from src.dqn.action_space import ACTIONS, action_dim, audit_action_space, get_action
-from src.dqn.action_mask import build_dqn_action_mask, action_mask_diagnostics
 from src.dqn.config import DQNConfig
-from src.dqn.state_builder import build_state
 from src.dqn.reward_function import compute_reward
+from src.dqn.state_builder import build_state
 from src.evaluation.diversity import objective_space_diversity
 from src.evaluation.generation_diagnostics import make_convergence_history, record_generation
-from src.constraints.cv_pressure import normalize_cv_components
-from src.optimizers.generation_executor import GenerationExecutor, copy_solution_metrics
+from src.evaluator.individual_evaluator import evaluate_individual, configured_max_repair_iter
 from src.io.population_snapshot import load_population_snapshot, save_population_snapshot
+from src.model.pareto_archive import ParetoArchive
+from src.model.population import Population
+from src.optimizers.base_optimizer import BaseOptimizer
+from src.optimizers.generation_executor import GenerationExecutor, copy_solution_metrics
 from src.utils.logger import get_logger
 
 logger = get_logger("DQN-CR-MODE")
@@ -124,18 +125,23 @@ class DQNCRMode(BaseOptimizer):
         self.population = self.initialize_population()
         self.evaluate_population()
         self.archive.update(self.population.solutions)
+        self._save_pressure_contract()
         self._record_convergence()
         current_metrics = self._metrics()
         state = build_state(
             self.population,
             self.archive,
             self.ctx,
-            {"HV": current_metrics["HV"], "current_HV": current_metrics["HV"]},
+            {
+                "HV": current_metrics["HV"],
+                "current_HV": current_metrics["HV"],
+                "population_pressure": current_metrics["population_pressure"],
+            },
             0,
             self.Tmax,
         )
         hv_stall = 0
-        mask = self._build_mask(current_metrics, hv_stall)
+        mask, mask_diag = self._build_mask(current_metrics, hv_stall)
         mask_delta_hv = None
         self._log_generation(0, None, None, current_metrics)
 
@@ -169,6 +175,7 @@ class DQNCRMode(BaseOptimizer):
                 {
                     "HV": current_metrics["HV"],
                     "current_HV": next_metrics["HV"],
+                    "population_pressure": next_metrics["population_pressure"],
                 },
                 generation,
                 self.Tmax,
@@ -176,12 +183,13 @@ class DQNCRMode(BaseOptimizer):
             delta_hv = next_metrics["HV"] - current_metrics["HV"]
             improved = delta_hv > 1.0e-12
             hv_stall = 0 if improved else hv_stall + 1
-            next_mask = self._build_mask(next_metrics, hv_stall, delta_hv)
+            next_mask, next_mask_diag = self._build_mask(next_metrics, hv_stall, delta_hv)
             reward, parts = compute_reward(
                 current_metrics,
                 next_metrics,
                 self.max_repair_iter,
                 self.dqn_config.reward_clip,
+                self.dqn_config.pressure_regression_tolerance,
             )
             loss = None
             if self.execution_mode == "train":
@@ -199,7 +207,6 @@ class DQNCRMode(BaseOptimizer):
                     if step_loss is not None:
                         loss = step_loss
 
-            mask_diag = action_mask_diagnostics(mask, ACTIONS, current_metrics)
             row = {
                 "generation": generation,
                 "action_id": action_id,
@@ -215,22 +222,50 @@ class DQNCRMode(BaseOptimizer):
                 "num_allowed_actions": mask_diag["num_allowed_actions"],
                 "allowed_action_names": mask_diag["allowed_action_names"],
                 "dominant_pressure": mask_diag["dominant_pressure"],
+                "dominant_pressure_value": mask_diag["dominant_pressure_value"],
+                "second_pressure_value": mask_diag["second_pressure_value"],
+                "dominant_pressure_margin": mask_diag["dominant_pressure_margin"],
+                "dominant_pressure_clear": mask_diag["dominant_pressure_clear"],
+                "mask_fallback_used": mask_diag["mask_fallback_used"],
+                "mask_reason": mask_diag["mask_reason"],
                 "delta_HV_for_mask": current_mask_delta_hv,
                 "hv_stall_generations_for_mask": current_mask_hv_stall,
                 "action_was_allowed": bool(mask[action_id]),
                 "FR_after_repair": next_metrics["FR"],
                 "CV_after_repair": next_metrics["CV_mean"],
+                "CV_min_after_repair": next_metrics["CV_min"],
                 "HV": next_metrics["HV"],
                 "coverage_best": next_metrics["best_coverage"],
                 "rsum_capacity_best": self.convergence_history["rsum_capacity_best"][-1],
                 "archive_size": len(self.archive),
                 "pareto_count": self.convergence_history["pareto_count"][-1],
                 "evaluation_count": self.evaluation_count,
+                "pressure_schema_version": self.dqn_config.pressure_schema_version,
+                "pressure_reference_source": self.dqn_config.pressure_reference_source,
+                **{
+                    f"cv_{key}_mean": next_metrics["raw_cv"][key]
+                    for key in CV_COMPONENT_KEYS
+                },
+                **{
+                    f"p_{key}_mean": next_metrics["pressure"][key]
+                    for key in CV_COMPONENT_KEYS
+                },
+                **{
+                    f"b_{key}_rate": next_metrics["pressure_violation_rate"][key]
+                    for key in CV_COMPONENT_KEYS
+                },
+                **{
+                    f"p_{key}_saturation_rate": next_metrics["pressure_saturation_rate"][key]
+                    for key in CV_COMPONENT_KEYS
+                },
+                "next_dominant_pressure": next_mask_diag["dominant_pressure"],
+                "next_dominant_pressure_clear": next_mask_diag["dominant_pressure_clear"],
             }
             self.training_log.append(row)
 
             state = next_state
             mask = next_mask
+            mask_diag = next_mask_diag
             mask_delta_hv = delta_hv
             current_metrics = next_metrics
             if generation % 10 == 0 or generation == self.Tmax:
@@ -284,6 +319,13 @@ class DQNCRMode(BaseOptimizer):
             "state_normalizer_frozen": bool(self.agent.state_normalizer.frozen),
             "reward_normalizer_frozen": bool(self.agent.reward_normalizer.frozen),
         }
+        dqn_config = getattr(self, "dqn_config", None)
+        if dqn_config is not None:
+            self.dqn_validity_report.update({
+                "pressure_schema_version": dqn_config.pressure_schema_version,
+                "pressure_refs": dict(dqn_config.pressure_refs),
+                "pressure_reference_source": dqn_config.pressure_reference_source,
+            })
         if self.checkpoint_loaded:
             base = self.config.get("runtime", {}).get("output_dir", "results")
             path = os.path.join(base, "data", "dqn_validity_report.json")
@@ -304,29 +346,21 @@ class DQNCRMode(BaseOptimizer):
         mask_metrics["hv_stall_generations"] = hv_stall
         if delta_hv is not None:
             mask_metrics["delta_HV"] = float(delta_hv)
-        return build_dqn_action_mask(mask_metrics, ACTIONS, self.config)
+        return build_dqn_action_mask_details(mask_metrics, ACTIONS, self.config)
 
     def _metrics(self):
         solutions = list(self.population.solutions or [])
         feasible = [solution for solution in solutions if solution.feasible]
-        pressures = [normalize_cv_components(solution, self.ctx) for solution in solutions]
-        if pressures:
-            pressure = {
-                key: float(np.mean([item[key] for item in pressures]))
-                for key in pressures[0]
-            }
-        else:
-            pressure = {
-                key: 0.0
-                for key in ["deploy", "link", "power", "energy", "sink", "service", "total"]
-            }
+        summary = aggregate_population_pressure(solutions, self.ctx)
         rsum_max = float(self.config.get("evaluation", {}).get("rsum_ref_max", 2.0e8))
         best_rsum_capacity = max(
             [float(solution.rsum_capacity) for solution in feasible],
             default=0.0,
         )
+        cv_values = [float(solution.cv) for solution in solutions]
         return {
-            "CV_mean": float(np.mean([solution.cv for solution in solutions])) if solutions else 0.0,
+            "CV_mean": float(np.mean(cv_values)) if cv_values else 0.0,
+            "CV_min": float(np.min(cv_values)) if cv_values else 0.0,
             "FR": len(feasible) / len(solutions) if solutions else 0.0,
             "HV": self.convergence_history["HV"][-1] if self.convergence_history["HV"] else 0.0,
             "best_coverage": max([solution.coverage for solution in feasible], default=0.0),
@@ -335,7 +369,11 @@ class DQNCRMode(BaseOptimizer):
             "energy_cv_sensor": float(np.mean([solution.cv_energy_sensor for solution in solutions])) if solutions else 0.0,
             "energy_cv_ap": float(np.mean([solution.cv_energy_ap for solution in solutions])) if solutions else 0.0,
             "diversity": objective_space_diversity(solutions),
-            "pressure": pressure,
+            "raw_cv": dict(summary.mean_raw_cv),
+            "pressure": dict(summary.mean_pressure),
+            "pressure_violation_rate": dict(summary.violation_rate),
+            "pressure_saturation_rate": dict(summary.saturation_rate),
+            "population_pressure": summary,
             "mean_repair_iter": float(np.mean([
                 getattr(solution, "repair_iter", 0) for solution in solutions
             ])) if solutions else 0.0,
@@ -351,6 +389,24 @@ class DQNCRMode(BaseOptimizer):
             f"Rsum={metrics['best_rsum_capacity']:.1f} "
             f"Archive={len(self.archive)} Evals={self.evaluation_count}"
         )
+
+    def _save_pressure_contract(self):
+        """Persist the fixed DQN-only scale used by this run."""
+        runtime = self.config.get("runtime", {})
+        base = runtime.get("output_dir", "results")
+        path = os.path.join(base, "data", "dqn_pressure_contract.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        payload = {
+            "cv_component_keys": list(CV_COMPONENT_KEYS),
+            "pressure_schema_version": self.dqn_config.pressure_schema_version,
+            "pressure_refs": dict(self.dqn_config.pressure_refs),
+            "cv_zero_tol": self.dqn_config.pressure_cv_zero_tol,
+            "reference_source": self.dqn_config.pressure_reference_source,
+            "state_cv_total_ref": self.dqn_config.state_cv_total_ref,
+            "action_mask_thresholds": dict(self.dqn_config.mask_thresholds),
+        }
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=2, sort_keys=True)
 
     def _save_training_log(self):
         if not self.training_log:

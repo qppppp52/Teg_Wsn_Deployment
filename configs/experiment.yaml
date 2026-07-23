@@ -1,5 +1,6 @@
 experiment:
   algorithms:
+  - mode
   - cr_mode
   dpi: 150
   num_runs: 1

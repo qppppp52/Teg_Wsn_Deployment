@@ -108,3 +108,17 @@ def test_dqn_frozen_evaluation_evidence_detects_no_training_changes():
     assert optimizer.dqn_validity_report["DQN_VALID"] is True
     assert optimizer.dqn_validity_report["parameter_hash_before"] == optimizer.dqn_validity_report["parameter_hash_after"]
     assert optimizer.dqn_validity_report["gradient_steps_before"] == optimizer.dqn_validity_report["gradient_steps_after"]
+
+def test_checkpoint_rejects_changed_pressure_reference():
+    torch = pytest.importorskip("torch")
+    from src.dqn.dqn_agent import DQNAgent
+    from src.dqn.state_builder import STATE_KEYS
+
+    cfg = make_dqn_config(hidden_dims=(8,), batch_size=2)
+    source = _writable_test_dir() / f"dqn_pressure_{uuid.uuid4().hex}.pt"
+    DQNAgent(len(STATE_KEYS), len(ACTIONS), cfg).save(str(source))
+
+    incompatible = make_dqn_config(hidden_dims=(8,), batch_size=2)
+    incompatible["dqn"]["pressure_normalization"]["refs"]["deploy"] = 1.5
+    with pytest.raises(ValueError, match="pressure_normalization"):
+        DQNAgent.from_checkpoint(str(source), incompatible)

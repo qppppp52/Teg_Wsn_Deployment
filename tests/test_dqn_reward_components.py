@@ -10,7 +10,7 @@ def test_dqn_reward_components_positive_for_cv_fr_hv_improvement():
         "best_rsum_norm": 0.3,
         "diversity": 0.1,
         "mean_repair_iter": 3.0,
-        "pressure": {"deploy": 0.1, "link": 0.4, "capacity": 0.2, "energy": 0.5, "sink": 0.1, "service": 0.2},
+        "pressure": {"deploy": 0.1, "link": 0.4, "power": 0.2, "energy": 0.5, "sink": 0.1, "service": 0.2},
     }
     after = {
         "CV_mean": 2.0,
@@ -20,7 +20,7 @@ def test_dqn_reward_components_positive_for_cv_fr_hv_improvement():
         "best_rsum_norm": 0.4,
         "diversity": 0.15,
         "mean_repair_iter": 2.0,
-        "pressure": {"deploy": 0.05, "link": 0.2, "capacity": 0.1, "energy": 0.25, "sink": 0.05, "service": 0.1},
+        "pressure": {"deploy": 0.05, "link": 0.2, "power": 0.1, "energy": 0.25, "sink": 0.05, "service": 0.1},
     }
     reward, parts = compute_reward(before, after, max_repair_iter=5)
     assert reward > 0
@@ -38,7 +38,7 @@ def test_dqn_reward_near_zero_or_cost_penalized_when_stable_feasible():
         "best_rsum_norm": 0.8,
         "diversity": 0.2,
         "mean_repair_iter": 1.0,
-        "pressure": {"deploy": 0.0, "link": 0.0, "capacity": 0.0, "energy": 0.0, "sink": 0.0, "service": 0.0},
+        "pressure": {"deploy": 0.0, "link": 0.0, "power": 0.0, "energy": 0.0, "sink": 0.0, "service": 0.0},
     }
     reward, parts = compute_reward(metrics, metrics, max_repair_iter=5)
     assert reward <= 0.0

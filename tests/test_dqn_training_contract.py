@@ -19,6 +19,7 @@ def _solution(coverage, rsum):
     solution.rsum_capacity = rsum
     solution.feasible = True
     solution.cv = 0.0
+    solution.constraint_report = SimpleNamespace(feasible=True, state_revision=0)
     return solution
 
 

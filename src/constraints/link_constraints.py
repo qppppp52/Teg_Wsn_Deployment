@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.constraints.constraint_report import edge_ptx_max, evaluate_constraints, mark_physical_state_dirty
+from src.constraints.constraint_report import global_ptx_max, evaluate_constraints, mark_physical_state_dirty
 from src.physics.numerical_tolerances import POWER_ABS_TOL
+
+
+LINK_REPAIR_SEMANTICS_VERSION = 2
 
 
 def single_valid_connected_ap(solution, sensor_id, ctx):
@@ -21,7 +24,7 @@ def single_valid_connected_ap(solution, sensor_id, ctx):
         solution.y[ap_id] != 1
         or ctx.link_feasible_matrix[sensor_id, ap_id] != 1
         or not np.isfinite(ptx_min)
-        or ptx_min > edge_ptx_max(ctx, sensor_id, ap_id) + POWER_ABS_TOL
+        or ptx_min > global_ptx_max(ctx) + POWER_ABS_TOL
     ):
         return None
     return ap_id
@@ -37,6 +40,7 @@ def repair_link_constraints(solution, ctx):
     K = int(ctx.num_candidates)
     ap_ids = [int(ap_id) for ap_id in np.where(solution.y == 1)[0]]
     previous_connections = solution.c.copy()
+    previous_connection_counts = np.sum(previous_connections == 1, axis=1)
     previous_power = solution.p_tx.copy()
 
     for sensor_id in range(K):
@@ -49,7 +53,7 @@ def repair_link_constraints(solution, ctx):
                 or solution.y[ap_id] != 1
                 or ctx.link_feasible_matrix[sensor_id, ap_id] != 1
                 or not np.isfinite(ptx_min)
-                or ptx_min > edge_ptx_max(ctx, sensor_id, ap_id) + POWER_ABS_TOL
+                or ptx_min > global_ptx_max(ctx) + POWER_ABS_TOL
             ):
                 solution.c[sensor_id, ap_id] = 0
 
@@ -68,7 +72,7 @@ def repair_link_constraints(solution, ctx):
                 for ap_id in ap_ids
                 if ctx.link_feasible_matrix[sensor_id, ap_id] == 1
                 and np.isfinite(ctx.ptx_min_matrix[sensor_id, ap_id])
-                and ctx.ptx_min_matrix[sensor_id, ap_id] <= edge_ptx_max(ctx, sensor_id, ap_id) + POWER_ABS_TOL
+                and ctx.ptx_min_matrix[sensor_id, ap_id] <= global_ptx_max(ctx) + POWER_ABS_TOL
             ]
             if feasible:
                 best_ap = min(
@@ -84,11 +88,14 @@ def repair_link_constraints(solution, ctx):
             continue
         ptx_min = float(ctx.ptx_min_matrix[sensor_id, ap_id])
         previous = float(previous_power[sensor_id, ap_id])
-        if not np.isfinite(previous) or previous <= 0.0:
-            previous = ptx_min
-        solution.p_tx[sensor_id, ap_id] = min(
-            edge_ptx_max(ctx, sensor_id, ap_id), max(ptx_min, previous)
+        connection_changed = bool(
+            previous_connections[sensor_id, ap_id] != 1
+            or previous_connection_counts[sensor_id] != 1
         )
+        invalid_previous_power = not np.isfinite(previous) or previous < 0.0
+        if connection_changed or invalid_previous_power:
+            previous = ptx_min
+        solution.p_tx[sensor_id, ap_id] = min(global_ptx_max(ctx), max(ptx_min, previous))
     if (
         not np.array_equal(previous_connections, solution.c)
         or not np.array_equal(previous_power, solution.p_tx)

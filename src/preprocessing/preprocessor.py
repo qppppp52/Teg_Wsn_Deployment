@@ -17,6 +17,7 @@ logger = get_logger("preprocessor")
 
 
 def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
+    ctx = ProblemContext(config)
     cand = scenario.candidate_points
     cand_coords = cand[:, :3].astype(float)
     K = len(cand)
@@ -49,7 +50,6 @@ def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
 
     idx_map = IndexMapping(K, sensor_mask, ap_mask)
 
-    ctx = ProblemContext()
     ctx.num_candidates = K
     ctx.num_targets = scenario.num_targets
     ctx.candidate_coords = cand_coords
@@ -65,13 +65,11 @@ def run_preprocessing(scenario, config: dict, seed: int) -> ProblemContext:
     ctx.ptx_min_matrix = link_mats["ptx_min"]
     ctx.link_feasible_matrix = link_mats["link_feasible"]
     ctx.potential_rate_matrix = link_mats["potential_rate"]
-    ctx.optimistic_ptx_up_matrix = link_mats["optimistic_ptx_up"]
     ctx.neighbor_sets = neighbor_sets
     ctx.nmax = nmax
     ctx.sensor_mask = sensor_mask
     ctx.ap_mask = ap_mask
     ctx.index_mapping = idx_map
-    ctx.config = config
     ctx.Rs = Rs
     ensure_constraint_spec(ctx)
     return ctx

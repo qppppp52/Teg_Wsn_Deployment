@@ -20,6 +20,7 @@ def _heatsink_ctx(count=3):
         nmax=np.full(count, count, dtype=np.int32),
         neighbor_sets=[list(range(count)) for _ in range(count)],
         config={
+            "channel": {"p_tx_max": 0.5},
             "heatsink": {
                 "allow_sink_sink_overlap": False,
                 "allow_sink_on_other_node": False,
@@ -93,9 +94,23 @@ def test_feasible_solution_replaces_same_objective_infeasible_archive_entry():
     infeasible.coverage = 0.5
     infeasible.rsum_capacity = 100.0
     infeasible.cv = 1.0
+    infeasible.constraint_report = SimpleNamespace(
+        feasible=False,
+        state_revision=0,
+        cv_total=1.0,
+        max_component_cv=1.0,
+        violated_components=("energy",),
+    )
     feasible = infeasible.copy()
     feasible.feasible = True
     feasible.cv = 0.0
+    feasible.constraint_report = SimpleNamespace(
+        feasible=True,
+        state_revision=0,
+        cv_total=0.0,
+        max_component_cv=0.0,
+        violated_components=(),
+    )
 
     archive.update([infeasible, feasible])
 

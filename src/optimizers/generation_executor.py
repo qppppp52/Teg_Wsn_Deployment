@@ -8,6 +8,7 @@ from src.evaluator.individual_evaluator import evaluate_individual, configured_m
 from src.model.population import Population
 from src.operators.mode_crossover import crossover
 from src.operators.mode_mutation import mutate, select_pareto_guide
+from src.constraints.report_freshness import require_fresh_constraint_report
 from src.evaluation.constrained_dominance import constrained_dominates as report_constrained_dominates
 
 
@@ -21,10 +22,11 @@ class GenerationResult:
 class GenerationExecutor:
     """Generate NP trials and apply constrained Pareto environmental selection."""
 
-    def __init__(self, ctx, population_size: int):
+    def __init__(self, ctx, population_size: int, evaluator=evaluate_individual):
         self.ctx = ctx
         self.population_size = int(population_size)
         self.max_repair_iter = configured_max_repair_iter(ctx)
+        self.evaluator = evaluator
 
     def execute(self, population, action: dict) -> GenerationResult:
         parents = list(population.individuals)
@@ -44,7 +46,7 @@ class GenerationExecutor:
                 guide=guide,
             )
             trial = crossover(parent, mutant, float(action["CR"]))
-            solution, repaired = evaluate_individual(
+            solution, repaired = self.evaluator(
                 trial,
                 self.ctx,
                 max_repair_iter=self.max_repair_iter,
@@ -72,7 +74,9 @@ class GenerationExecutor:
 
 
 def environmental_select(individuals, solutions, size: int):
-    """NSGA-II style selection using Deb's constrained dominance rule."""
+    """NSGA-II selection using fresh reports before objective diversity."""
+    for solution in solutions:
+        require_fresh_constraint_report(solution, "environmental selection")
     fronts = _fast_non_dominated_sort(solutions)
     selected = []
     for front in fronts:
@@ -82,7 +86,13 @@ def environmental_select(individuals, solutions, size: int):
         if len(front) <= remaining:
             selected.extend(front)
             continue
-        distances = _crowding_distance([solutions[index] for index in front])
+        front_solutions = [solutions[index] for index in front]
+        if not all(solution.feasible for solution in front_solutions):
+            # Exact constraint ties stay deterministic; objectives do not rank
+            # solutions that are still infeasible.
+            selected.extend(front[:remaining])
+            break
+        distances = _crowding_distance(front_solutions)
         order = np.argsort(distances, kind="stable")[::-1]
         selected.extend(front[index] for index in order[:remaining])
         break
@@ -127,16 +137,10 @@ def _crowding_distance(solutions):
     count = len(solutions)
     if count <= 2:
         return np.full(count, np.inf)
-    if all(solution.feasible for solution in solutions):
-        values = np.asarray(
-            [[solution.coverage, solution.rsum_capacity] for solution in solutions],
-            dtype=float,
-        )
-    else:
-        values = np.asarray(
-            [[-float(solution.cv), solution.coverage, solution.rsum_capacity] for solution in solutions],
-            dtype=float,
-        )
+    values = np.asarray(
+        [[solution.coverage, solution.rsum_capacity] for solution in solutions],
+        dtype=float,
+    )
     distances = np.zeros(count, dtype=float)
     for column in range(values.shape[1]):
         order = np.argsort(values[:, column], kind="stable")

@@ -1,4 +1,5 @@
 deployment:
+  count_mode: topk_up_to_max
   max_aps: 3
   max_sensors: 15
 discretization:

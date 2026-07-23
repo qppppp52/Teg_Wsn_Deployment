@@ -7,7 +7,7 @@ import time
 import numpy as np
 
 from src.constraints.constraint_eval import evaluate_all_constraints
-from src.constraints.constraint_report import edge_ptx_max
+from src.constraints.constraint_report import global_ptx_max
 from src.constraints.link_constraints import single_valid_connected_ap
 from src.heatsink.harvest_power import refresh_harvest_diagnostics
 from src.heatsink.sink_overlap_rules import SinkOverlapRules
@@ -86,7 +86,7 @@ def enhance_rsum_capacity_greedily(solution, ctx):
             if ap_id is None:
                 continue
             current_power = float(candidate.p_tx[sensor_id, ap_id])
-            ptx_max = edge_ptx_max(ctx, sensor_id, ap_id)
+            ptx_max = global_ptx_max(ctx)
             if current_power >= ptx_max - POWER_ABS_TOL:
                 continue
             owned = set(candidate.z_sink_sensor[sensor_id])

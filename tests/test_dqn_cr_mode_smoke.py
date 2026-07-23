@@ -28,5 +28,6 @@ def test_dqn_cr_mode_train_smoke_uses_shared_finalizer():
     assert summary["mode_individual_evaluations"] == 8
     assert summary["boost_invocations"] >= 0
     assert (output_dir / "data" / "dqn_training_action_log.csv").exists()
+    assert (output_dir / "data" / "dqn_pressure_contract.json").exists()
     assert (output_dir / "data" / "pareto_solution_details.csv").exists()
     assert archive.solutions

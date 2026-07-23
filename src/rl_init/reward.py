@@ -34,11 +34,7 @@ def normalize_rsum_capacity(rsum_capacity: float, norm_cfg: dict) -> float:
 
 def compute_terminal_reward(env, reward_cfg: dict, norm_cfg: dict) -> tuple[float, dict]:
     individual = env.build_current_individual()
-    solution, _ = evaluate_individual(
-        individual,
-        env.ctx,
-        max_repair_iter=int(env.cfg.get("max_repair_iter", env.ctx.config.get("constraints", {}).get("max_repair_iter", 5))),
-    )
+    solution, _ = evaluate_individual(individual, env.ctx)
     coverage = float(getattr(solution, "coverage", 0.0))
     rsum_capacity = float(solution.rsum_capacity)
     cv = float(getattr(solution, "cv", 0.0))

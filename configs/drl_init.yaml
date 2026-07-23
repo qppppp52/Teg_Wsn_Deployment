@@ -40,7 +40,7 @@ drl_init:
     - ap
     - skip
     - stop
-  max_repair_iter: 5
+
 
   reward:
     coverage: 0.25

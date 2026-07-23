@@ -1,3 +1,4 @@
+import csv
 import os
 import uuid
 from pathlib import Path
@@ -39,3 +40,11 @@ def test_small_center_heat_experiment_smoke():
     assert (out_dir / "data" / "pareto_solutions.csv").exists()
     assert (out_dir / "figures" / "temperature_faces.png").exists()
     assert (out_dir / "data" / "candidate_temperature.csv").exists()
+    with open(out_dir / "data" / "convergence.csv", newline="", encoding="utf-8") as file:
+        convergence_fields = next(csv.reader(file))
+    assert "sink_duplicate_count_mean" in convergence_fields
+    assert "sink_dominant_violation" in convergence_fields
+    with open(out_dir / "data" / "pareto_solution_details.csv", newline="", encoding="utf-8") as file:
+        detail_fields = next(csv.reader(file))
+    assert "sink_duplicate_count" in detail_fields
+    assert "sink_shortage_sensor" in detail_fields

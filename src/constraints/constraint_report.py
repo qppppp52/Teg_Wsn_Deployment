@@ -20,6 +20,11 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from src.model.problem_context import (
+    resolve_global_ptx_max,
+    validate_global_ptx_max,
+)
+
 from src.heatsink.sink_ownership import (
     SINK_OWNERSHIP_SEMANTICS_VERSION,
     SinkOwnership,
@@ -35,7 +40,7 @@ from src.physics.numerical_tolerances import (
 
 
 CV_SCHEMA_VERSION = 3
-CONSTRAINT_SEMANTICS_VERSION = 3
+CONSTRAINT_SEMANTICS_VERSION = 4
 COMPARATOR_VERSION = 2
 SINK_CLASSIFICATION_VERSION = 2
 ENERGY_TOLERANCE_VERSION = 2
@@ -93,6 +98,7 @@ class SinkHardViolations:
 
 @dataclass(frozen=True)
 class SinkDiagnostics:
+    declared_sink_total: int
     shortage_sensor: int
     shortage_ap: int
     required_sensor_total: int
@@ -203,7 +209,6 @@ class ConstraintEvaluationSpec:
         config = getattr(ctx, "config", None) or {}
         constraints = config.get("constraints", {}) or {}
         deployment = config.get("deployment", {}) or {}
-        channel = config.get("channel", {}) or {}
         weights = constraints.get("cv_weights", {}) or {}
         spec = cls(
             cv_schema_version=int(constraints.get("cv_schema_version", CV_SCHEMA_VERSION)),
@@ -232,7 +237,7 @@ class ConstraintEvaluationSpec:
                 )
             ),
             max_ap_rebalance_moves=int(constraints.get("max_ap_rebalance_moves", 0)),
-            ptx_max=float(channel.get("p_tx_max", 0.5)),
+            ptx_max=global_ptx_max(ctx),
             cv_weights=CVComponents(
                 deploy=float(weights.get("deploy", 1.0)),
                 link=float(weights.get("link", 1.0)),
@@ -329,9 +334,14 @@ def build_context_signature(ctx, spec: ConstraintEvaluationSpec | None = None) -
         "P_grid",
         "channel_gain_matrix",
         "potential_rate_matrix",
-        "optimistic_ptx_up_matrix",
     ):
         payload[name] = _array_digest(getattr(ctx, name, None))
+    ptx_min = getattr(ctx, "ptx_min_matrix", None)
+    legacy_broadcast_max = (
+        np.full_like(np.asarray(ptx_min), spec.ptx_max) if ptx_min is not None else None
+    )
+    # Preserve valid case-A checkpoint hashes without retaining a second authority.
+    payload["optimistic_ptx_up_matrix"] = _array_digest(legacy_broadcast_max)
     payload["neighbor_sets"] = [
         sorted(int(value) for value in neighbors)
         for neighbors in (getattr(ctx, "neighbor_sets", None) or [])
@@ -368,7 +378,7 @@ def validate_context_physics(ctx) -> None:
             raise ValueError(f"context P_grid must have shape {(K,)}")
         if p_grid.size and (not np.all(np.isfinite(p_grid)) or np.any(p_grid < 0.0)):
             raise ValueError("P_grid must be finite and non-negative; zero is allowed")
-    for name in ("ptx_min_matrix", "link_feasible_matrix", "optimistic_ptx_up_matrix"):
+    for name in ("ptx_min_matrix", "link_feasible_matrix"):
         value = getattr(ctx, name, None)
         if value is None:
             continue
@@ -702,9 +712,8 @@ def _power_cv(solution, ctx, spec, raw, physical_edges):
                 continue
             pmin = float(ctx.ptx_min_matrix[sensor_id, ap_id])
             lower = max(0.0, pmin - value - spec.power_abs_tol - spec.power_rel_tol * max(1.0, abs(pmin)))
-            edge_pmax = _edge_ptx_max(ctx, sensor_id, ap_id, spec)
-            upper = max(0.0, value - edge_pmax - spec.power_abs_tol - spec.power_rel_tol * max(1.0, abs(edge_pmax)))
-            terms.append((lower + upper) / max(edge_pmax, 1.0e-12))
+            upper = max(0.0, value - spec.ptx_max - spec.power_abs_tol - spec.power_rel_tol * max(1.0, abs(spec.ptx_max)))
+            terms.append((lower + upper) / spec.ptx_max)
     p_bound = float(np.mean(terms)) if terms else 0.0
     active_sensors = max(1, int(np.sum(solution.x == 1)))
     p_state = raw.power_state_invalid_sensor_count / active_sensors
@@ -741,7 +750,7 @@ def _raw_breakdown(solution, ctx, spec, ownership, requirements, energy):
                 0.0,
                 pmin - value - spec.power_abs_tol - spec.power_rel_tol * max(1.0, abs(pmin)),
             )
-            edge_pmax = _edge_ptx_max(ctx, sensor_id, ap_id, spec)
+            edge_pmax = spec.ptx_max
             upper_physical += max(0.0, value - edge_pmax)
             upper_violation += max(
                 0.0,
@@ -751,7 +760,15 @@ def _raw_breakdown(solution, ctx, spec, ownership, requirements, energy):
             invalid_sensor_rows += 1
     sink_hard, sink_diag = _classify_sink_claims(solution, ctx, requirements, ownership)
     empty_ap = int(
-        sum(solution.y[ap_id] == 1 and not np.any((solution.c[:, ap_id] == 1) & (solution.x == 1)) for ap_id in range(ctx.num_candidates))
+        sum(
+            solution.y[ap_id] == 1
+            and not any(
+                solution.c[sensor_id, ap_id] == 1
+                and _physical_link(solution, ctx, sensor_id, ap_id, spec)
+                for sensor_id in range(ctx.num_candidates)
+            )
+            for ap_id in range(ctx.num_candidates)
+        )
     )
     raw = RawViolationBreakdown(
         deploy_sensor_excess=max(0, int(np.sum(solution.x)) - spec.max_sensors),
@@ -759,7 +776,7 @@ def _raw_breakdown(solution, ctx, spec, ownership, requirements, energy):
         role_overlap_count=int(np.sum((solution.x == 1) & (solution.y == 1))),
         invalid_endpoint_link_count=int(declared - endpoint),
         physical_infeasible_link_count=int(endpoint - physical),
-        connection_degree_mismatch=_connection_degree_mismatch(solution),
+        connection_degree_mismatch=_connection_degree_mismatch(solution, ctx, spec),
         nonfinite_power_edge_count=nonfinite,
         negative_power_edge_count=negative,
         inactive_nonzero_power_edge_count=inactive_nonzero,
@@ -791,7 +808,7 @@ def _declared_edge_counts(solution, ctx, spec):
 
 def _physical_link(solution, ctx, sensor_id, ap_id, spec):
     pmin = float(ctx.ptx_min_matrix[sensor_id, ap_id])
-    edge_pmax = _edge_ptx_max(ctx, sensor_id, ap_id, spec)
+    edge_pmax = spec.ptx_max
     return bool(
         solution.x[sensor_id] == 1
         and solution.y[ap_id] == 1
@@ -801,33 +818,31 @@ def _physical_link(solution, ctx, sensor_id, ap_id, spec):
     )
 
 
-def _connection_degree_mismatch(solution):
+def _connection_degree_mismatch(solution, ctx, spec):
     total = 0
     for sensor_id in np.where(solution.x == 1)[0]:
-        degree = int(np.sum(solution.c[sensor_id] == 1))
-        if degree == 0:
+        declared_ap_ids = np.where(solution.c[sensor_id] == 1)[0]
+        if len(declared_ap_ids) == 0:
             total += 1
-        elif degree > 1:
-            total += degree - 1
+            continue
+        physical_degree = sum(
+            _physical_link(solution, ctx, int(sensor_id), int(ap_id), spec)
+            for ap_id in declared_ap_ids
+        )
+        if physical_degree > 1:
+            total += physical_degree - 1
     return int(total)
 
 
-def edge_ptx_max(ctx, sensor_id, ap_id, fallback=None):
-    matrix = getattr(ctx, "optimistic_ptx_up_matrix", None)
-    if matrix is not None:
-        array = np.asarray(matrix)
-        if array.ndim == 2 and sensor_id < array.shape[0] and ap_id < array.shape[1]:
-            value = float(array[sensor_id, ap_id])
-            if math.isfinite(value) and value > 0.0:
-                return value
-    if fallback is None:
-        config = getattr(ctx, "config", None) or {}
-        fallback = (config.get("channel", {}) or {}).get("p_tx_max", 0.5)
-    return float(fallback)
+def global_ptx_max(ctx) -> float:
+    """Return the validated global hardware TX-power limit for this context."""
+    value = getattr(ctx, "p_tx_max", None)
+    if value is None:
+        value = resolve_global_ptx_max(getattr(ctx, "config", None) or {})
+        setattr(ctx, "p_tx_max", value)
+    return validate_global_ptx_max(value)
 
 
-def _edge_ptx_max(ctx, sensor_id, ap_id, spec):
-    return edge_ptx_max(ctx, sensor_id, ap_id, fallback=spec.ptx_max)
 
 
 def _classify_sink_claims(solution, ctx, requirements, ownership):
@@ -899,6 +914,7 @@ def _classify_sink_claims(solution, ctx, requirements, ownership):
     for index, required in enumerate(requirements.required_ap):
         shortage_ap += max(0, int(required) - ownership.effective_ap_count[index])
     diagnostics = SinkDiagnostics(
+        declared_sink_total=int(len(all_claims)),
         shortage_sensor=int(shortage_sensor),
         shortage_ap=int(shortage_ap),
         required_sensor_total=int(sum(requirements.required_sensor)),
@@ -917,6 +933,62 @@ def _classify_sink_claims(solution, ctx, requirements, ownership):
         counts["cross"],
     ), diagnostics
 
+SINK_PRIMARY_VIOLATION_NAMES = (
+    "invalid_index_or_type",
+    "undeployed_owner",
+    "outside_allowed_neighborhood",
+    "illegal_node_overlap",
+    "duplicate",
+    "cross_owner_conflict",
+)
+
+SINK_DIAGNOSTIC_FIELDS = (
+    "sink_declared_total",
+    "sink_shortage_sensor",
+    "sink_shortage_ap",
+    "sink_required_sensor_total",
+    "sink_required_ap_total",
+    "sink_effective_sensor_total",
+    "sink_effective_ap_total",
+    "sink_unachievable_sensor_count",
+    "sink_unachievable_ap_count",
+) + tuple(
+    field
+    for name in SINK_PRIMARY_VIOLATION_NAMES
+    for field in (f"sink_{name}_count", f"sink_{name}_cv")
+) + ("sink_dominant_violation",)
+
+
+def sink_diagnostic_metrics(report: ConstraintReport) -> dict[str, Any]:
+    """Flatten SinkHard counts, normalized sub-CVs and shortage diagnostics."""
+    hard = report.raw.sink_hard
+    diagnostics = report.raw.sink_diagnostics
+    counts = {
+        "invalid_index_or_type": int(hard.invalid_index_or_type_count),
+        "undeployed_owner": int(hard.undeployed_owner_count),
+        "outside_allowed_neighborhood": int(hard.outside_allowed_neighborhood_count),
+        "illegal_node_overlap": int(hard.illegal_node_overlap_excess),
+        "duplicate": int(hard.duplicate_excess),
+        "cross_owner_conflict": int(hard.cross_owner_conflict_excess),
+    }
+    denominator = max(1, int(diagnostics.declared_sink_total))
+    values: dict[str, Any] = {
+        "sink_declared_total": int(diagnostics.declared_sink_total),
+        "sink_shortage_sensor": int(diagnostics.shortage_sensor),
+        "sink_shortage_ap": int(diagnostics.shortage_ap),
+        "sink_required_sensor_total": int(diagnostics.required_sensor_total),
+        "sink_required_ap_total": int(diagnostics.required_ap_total),
+        "sink_effective_sensor_total": int(diagnostics.effective_sensor_total),
+        "sink_effective_ap_total": int(diagnostics.effective_ap_total),
+        "sink_unachievable_sensor_count": int(diagnostics.unachievable_sensor_count),
+        "sink_unachievable_ap_count": int(diagnostics.unachievable_ap_count),
+    }
+    for name, count in counts.items():
+        values[f"sink_{name}_count"] = count
+        values[f"sink_{name}_cv"] = float(count / denominator)
+    dominant = max(counts, key=counts.get) if any(counts.values()) else "none"
+    values["sink_dominant_violation"] = dominant
+    return values
 
 def _hard_feasible(raw, physics, spec):
     sensor_energy_ok = all(value <= 0.0 for value in physics.energy.sensor_deficit_violation)
@@ -1022,8 +1094,11 @@ __all__ = [
     "RawViolationBreakdown",
     "SinkDiagnostics",
     "SinkHardViolations",
+    "SINK_PRIMARY_VIOLATION_NAMES",
+    "SINK_DIAGNOSTIC_FIELDS",
+    "sink_diagnostic_metrics",
     "SinkRequirementSnapshot",
-    "edge_ptx_max",
+    "global_ptx_max",
     "build_constraint_report",
     "build_context_signature",
     "compare_constraint_reports",

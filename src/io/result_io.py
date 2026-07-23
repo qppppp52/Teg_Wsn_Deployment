@@ -8,14 +8,17 @@ import pickle
 import numpy as np
 
 from src.heatsink.sink_ownership import build_sink_ownership
+from src.io.semantic_contract import build_semantic_contract, semantic_signature
 
 
-RESULT_SCHEMA_VERSION = 2
+RESULT_SCHEMA_VERSION = 3
 
 
 def save_pareto(solutions, path: str, ctx=None):
     """Save feasible Pareto solutions with reconstructable sink ownership."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    semantic_contract = build_semantic_contract(ctx.config) if ctx is not None else {}
+    artifact_semantic_signature = semantic_signature(ctx.config) if ctx is not None else ""
     feasible = [solution for solution in solutions if solution.feasible]
     objectives = np.asarray(
         [[solution.coverage, solution.rsum_capacity] for solution in feasible],
@@ -27,6 +30,8 @@ def save_pareto(solutions, path: str, ctx=None):
             objectives=objectives,
             result_schema_version=np.asarray(RESULT_SCHEMA_VERSION, dtype=np.int32),
             solution_count=np.asarray(0, dtype=np.int32),
+            semantic_contract=np.asarray(json.dumps(semantic_contract, sort_keys=True)),
+            semantic_signature=np.asarray(artifact_semantic_signature),
         )
         return
 
@@ -84,7 +89,6 @@ def save_pareto(solutions, path: str, ctx=None):
         (ctx.config.get("heatsink", {}) if ctx is not None else {}),
         sort_keys=True,
     )
-
     np.savez_compressed(
         path,
         objectives=objectives,
@@ -132,6 +136,8 @@ def save_pareto(solutions, path: str, ctx=None):
         cv=np.asarray([solution.cv for solution in feasible], dtype=np.float64),
         feasible_mask=np.ones(count, dtype=bool),
         overlap_policy=np.asarray(overlap_policy),
+        semantic_contract=np.asarray(json.dumps(semantic_contract, sort_keys=True)),
+        semantic_signature=np.asarray(artifact_semantic_signature),
         boost_applied=np.asarray(
             [bool(solution.metadata.get("boost_applied", False)) for solution in feasible],
             dtype=bool,

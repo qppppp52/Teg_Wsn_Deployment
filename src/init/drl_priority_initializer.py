@@ -12,6 +12,7 @@ import os
 import time
 import numpy as np
 from src.model.individual import Individual
+from src.constraints.repair_config import resolve_repair_config
 from src.evaluator.individual_evaluator import evaluate_individual
 
 try:
@@ -97,7 +98,9 @@ class DRLPriorityInitializer:
             sol, _ = evaluate_individual(
                 sample["individual"],
                 self.ctx,
-                max_repair_iter=int(cfg.get("eval_repair_iter", self.config.get("constraints", {}).get("max_repair_iter", 5))),
+                max_repair_iter=resolve_repair_config(
+                    self.config
+                ).max_outer_repair_rounds,
             )
             reward, components = self._reward(sol)
             if self.baseline is None:
@@ -267,7 +270,7 @@ class DRLPriorityInitializer:
         ref = float(reward_cfg.get("rsum_capacity_ref", self.config.get("evaluation", {}).get("rsum_ref_max", 2.0e7)))
         ref = max(ref, 1.0)
         rsum_capacity_norm = min(np.log1p(max(rsum_capacity, 0.0)) / np.log1p(ref), 2.0)
-        cv_ref = max(float(reward_cfg.get("cv_ref", self.config.get("constraints", {}).get("cv_pressure_refs", {}).get("total", 20.0))), 1e-12)
+        cv_ref = max(float(reward_cfg.get("cv_ref", 20.0)), 1e-12)
         cv_norm = min(float(sol.cv) / cv_ref, 3.0)
         reward = (
             float(reward_cfg.get("coverage_weight", 1.0)) * float(sol.coverage)

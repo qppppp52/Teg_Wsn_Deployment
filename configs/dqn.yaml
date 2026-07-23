@@ -27,18 +27,38 @@ dqn:
     clip: [-1.0, 1.0]
     normalize: true
     warmup_steps: 64
+    pressure_regression_tolerance: 0.02
   state_normalization:
     enabled: true
     warmup_steps: 64
     clip: 5.0
+    cv_total_ref: 20.0
+  pressure_normalization:
+    method: fixed_reference
+    schema_version: dqn_cv6_fixed_reference_v1
+    cv_zero_tol: 1.0e-12
+    # Bootstrap values preserve the old explicit scale only for the next
+    # training-pilot collection. Replace them with tool calibration output
+    # before any formal DQN training or comparison.
+    reference_source: migration_bootstrap_pending_pilot_calibration
+    refs:
+      deploy: 1.0
+      link: 10.0
+      power: 1.0
+      service: 5.0
+      sink: 10.0
+      energy: 1.0
   action_mask:
     enabled: true
     thresholds:
       low_fr: 0.2
       feasible_fr: 0.8
       low_cv: 0.001
-      high_pressure: 0.4
+      high_pressure: 0.60
+      dominant_margin: 0.05
       hv_stall_generations: 5
       small_delta_hv: 0.00001
   checkpoint:
     save_model: true
+    strict_schema: true
+    allow_legacy_checkpoint: false

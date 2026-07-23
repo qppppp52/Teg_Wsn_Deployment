@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
+from src.constraints.cv_pressure import (
+    load_pressure_normalization,
+    load_state_cv_total_ref,
+)
 from src.physics.evaluation_contract import physical_evaluation_contract
 
 _LEGACY_KEYS = {
@@ -32,12 +37,20 @@ class DQNConfig:
     reward_clip: tuple[float, float]
     reward_normalization: bool
     reward_warmup_steps: int
+    pressure_regression_tolerance: float
     state_normalization: bool
     state_warmup_steps: int
     state_clip: float
+    state_cv_total_ref: float
+    pressure_schema_version: str
+    pressure_refs: dict[str, float]
+    pressure_cv_zero_tol: float
+    pressure_reference_source: str
     action_mask_enabled: bool
     mask_thresholds: dict
     save_model: bool
+    checkpoint_strict_schema: bool
+    allow_legacy_checkpoint: bool
     training_episodes: int
     validation_interval: int
     validation_patience: int
@@ -56,12 +69,14 @@ class DQNConfig:
         allowed = {
             "enabled", "mode", "checkpoint_path", "network", "optimizer",
             "replay", "target_update", "exploration", "training", "reward",
-            "state_normalization", "action_mask", "checkpoint",
+            "state_normalization", "pressure_normalization", "action_mask",
+            "checkpoint",
         }
         _reject_unknown(raw, allowed, "dqn")
         required_sections = [
             "network", "optimizer", "replay", "target_update", "exploration",
-            "training", "reward", "state_normalization", "action_mask",
+            "training", "reward", "state_normalization", "pressure_normalization",
+            "action_mask",
         ]
         missing = [name for name in required_sections if not isinstance(raw.get(name), dict)]
         if missing:
@@ -98,15 +113,25 @@ class DQNConfig:
             },
             "dqn.training",
         )
-        _reject_unknown(reward, {"clip", "normalize", "warmup_steps"}, "dqn.reward")
+        _reject_unknown(
+            reward,
+            {"clip", "normalize", "warmup_steps", "pressure_regression_tolerance"},
+            "dqn.reward",
+        )
         _reject_unknown(
             state,
-            {"enabled", "warmup_steps", "clip"},
+            {"enabled", "warmup_steps", "clip", "cv_total_ref"},
             "dqn.state_normalization",
         )
         _reject_unknown(action_mask, {"enabled", "thresholds"}, "dqn.action_mask")
-        _reject_unknown(checkpoint, {"save_model"}, "dqn.checkpoint")
+        _reject_unknown(
+            checkpoint,
+            {"save_model", "strict_schema", "allow_legacy_checkpoint"},
+            "dqn.checkpoint",
+        )
 
+        pressure = load_pressure_normalization(config)
+        state_cv_total_ref = load_state_cv_total_ref(config)
         mode = str(raw.get("mode", "")).lower()
         if mode not in {"train", "eval"}:
             raise ValueError("dqn.mode must be either 'train' or 'eval'")
@@ -132,12 +157,22 @@ class DQNConfig:
             reward_clip=clip,
             reward_normalization=bool(reward.get("normalize", True)),
             reward_warmup_steps=int(reward.get("warmup_steps", 64)),
+            pressure_regression_tolerance=float(
+                reward.get("pressure_regression_tolerance", 0.02)
+            ),
             state_normalization=bool(state.get("enabled", True)),
             state_warmup_steps=int(state.get("warmup_steps", 64)),
             state_clip=float(state.get("clip", 5.0)),
+            state_cv_total_ref=state_cv_total_ref,
+            pressure_schema_version=pressure.schema_version,
+            pressure_refs=dict(pressure.refs),
+            pressure_cv_zero_tol=pressure.cv_zero_tol,
+            pressure_reference_source=pressure.reference_source,
             action_mask_enabled=bool(action_mask.get("enabled", True)),
             mask_thresholds=dict(action_mask.get("thresholds", {})),
             save_model=bool(checkpoint.get("save_model", True)),
+            checkpoint_strict_schema=bool(checkpoint.get("strict_schema", True)),
+            allow_legacy_checkpoint=bool(checkpoint.get("allow_legacy_checkpoint", False)),
             training_episodes=int(training.get("episodes", 120)),
             validation_interval=int(training.get("validation_interval", 5)),
             validation_patience=int(training.get("validation_patience", 20)),
@@ -171,6 +206,12 @@ class DQNConfig:
             raise ValueError("DQN normalizer warmup steps cannot be negative")
         if self.state_clip <= 0.0:
             raise ValueError("dqn.state_normalization.clip must be positive")
+        if not math.isfinite(self.pressure_regression_tolerance) or self.pressure_regression_tolerance < 0.0:
+            raise ValueError("dqn.reward.pressure_regression_tolerance must be finite and nonnegative")
+        if not self.checkpoint_strict_schema or self.allow_legacy_checkpoint:
+            raise ValueError(
+                "DQN checkpoints must use strict_schema=true and allow_legacy_checkpoint=false"
+            )
         _validate_mask_thresholds(self.mask_thresholds)
         enhancement = self.environment_contract.get("throughput_enhancement", {})
         if enhancement.get("enabled") and int(enhancement.get("max_boost_steps", 0)) <= 0:
@@ -180,7 +221,7 @@ class DQNConfig:
 def _validate_mask_thresholds(thresholds):
     allowed = {
         "low_fr", "feasible_fr", "low_cv", "high_pressure",
-        "hv_stall_generations", "small_delta_hv",
+        "dominant_margin", "hv_stall_generations", "small_delta_hv",
     }
     _reject_unknown(thresholds, allowed, "dqn.action_mask.thresholds")
     low_fr = float(thresholds.get("low_fr", 0.2))
@@ -189,12 +230,17 @@ def _validate_mask_thresholds(thresholds):
         raise ValueError("DQN mask FR thresholds must satisfy 0 <= low_fr <= feasible_fr <= 1")
     if float(thresholds.get("low_cv", 1.0e-3)) < 0.0:
         raise ValueError("DQN mask low_cv cannot be negative")
-    if float(thresholds.get("high_pressure", 0.4)) < 0.0:
-        raise ValueError("DQN mask high_pressure cannot be negative")
+    high_pressure = float(thresholds.get("high_pressure", 0.4))
+    if not 0.0 <= high_pressure <= 1.0:
+        raise ValueError("DQN mask high_pressure must be in [0, 1]")
+    margin = float(thresholds.get("dominant_margin", 0.05))
+    if not 0.0 <= margin <= 1.0:
+        raise ValueError("DQN mask dominant_margin must be in [0, 1]")
     if int(thresholds.get("hv_stall_generations", 5)) <= 0:
         raise ValueError("DQN mask hv_stall_generations must be positive")
     if float(thresholds.get("small_delta_hv", 1.0e-5)) < 0.0:
         raise ValueError("DQN mask small_delta_hv cannot be negative")
+
 
 def _reject_unknown(mapping, allowed, path):
     unknown = sorted(set(mapping) - set(allowed))

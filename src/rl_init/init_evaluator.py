@@ -5,12 +5,7 @@ from src.evaluator.individual_evaluator import evaluate_individual
 
 
 def evaluate_init_individual(individual, ctx, config, source_type="unknown") -> dict:
-    cfg = config.get("drl_init", config)
-    sol, rep_ind = evaluate_individual(
-        individual,
-        ctx,
-        max_repair_iter=int(cfg.get("max_repair_iter", ctx.config.get("constraints", {}).get("max_repair_iter", 5))),
-    )
+    sol, rep_ind = evaluate_individual(individual, ctx)
     if rep_ind is not None:
         individual = rep_ind
     return {"individual": individual, "solution": sol, "source_type": source_type, "quality_score": quality_score(sol, config)}

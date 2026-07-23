@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.constraints.constraint_report import edge_ptx_max
+from src.constraints.constraint_report import global_ptx_max
 from src.physics.numerical_tolerances import POWER_ABS_TOL
 
 
@@ -23,7 +23,7 @@ def assign_connections(x, y, ctx):
             for ap_id in ap_ids
             if ctx.link_feasible_matrix[sensor_id, ap_id] == 1
             and np.isfinite(ctx.ptx_min_matrix[sensor_id, ap_id])
-            and ctx.ptx_min_matrix[sensor_id, ap_id] <= edge_ptx_max(ctx, sensor_id, int(ap_id)) + POWER_ABS_TOL
+            and ctx.ptx_min_matrix[sensor_id, ap_id] <= global_ptx_max(ctx) + POWER_ABS_TOL
         ]
         if not feasible_aps:
             continue

@@ -8,7 +8,7 @@ def test_dqn_action_mask_keeps_at_least_one_action():
     metrics = {
         "FR": 0.0,
         "CV_mean": 10.0,
-        "pressure": {"energy": 1.0, "link": 1.0, "capacity": 1.0, "sink": 1.0},
+        "pressure": {"energy": 1.0, "link": 1.0, "power": 1.0, "sink": 1.0},
     }
     mask = build_dqn_action_mask(metrics, ACTIONS, {"dqn": {"action_mask": {"enabled": True, "thresholds": {}}}})
     assert mask.dtype == np.bool_
@@ -38,7 +38,7 @@ def test_dqn_action_mask_small_explicit_hv_change_opens_exploration():
         "FR": 0.5,
         "CV_mean": 2.0,
         "delta_HV": 0.0,
-        "pressure": {"energy": 0.8, "link": 0.2, "capacity": 0.1, "sink": 0.1},
+        "pressure": {"energy": 0.8, "link": 0.2, "power": 0.1, "sink": 0.1},
     }
     mask = build_dqn_action_mask(metrics, ACTIONS, {"dqn": {"action_mask": {"enabled": True, "thresholds": {}}}})
     names = [a["name"] for a in ACTIONS]
